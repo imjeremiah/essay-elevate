@@ -1,0 +1,15 @@
+# Ignore artifacts
+.next/
+node_modules/
+dist/
+build/
+coverage/
+.vercel/
+
+# Ignore lockfiles
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Ignore docs
+_docs/ 
