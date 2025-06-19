@@ -217,6 +217,8 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
 
     const text = editor.getText();
     console.log('🔍 Checking writing with text:', {
+      text: text,
+      textType: typeof text,
       length: text.length,
       preview: text.slice(0, 100) + '...'
     });
@@ -225,6 +227,26 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
       clearSuggestionMarks(editor);
       setWritingSuggestions([]);
       return;
+    }
+
+    // Clear any existing suggestions from the database for this document
+    try {
+      const user = (await supabase.auth.getUser()).data.user;
+      if (user) {
+        const { error: deleteError } = await supabase
+          .from('suggestions')
+          .delete()
+          .eq('document_id', initialDocument.id)
+          .eq('user_id', user.id);
+        
+        if (deleteError) {
+          console.error('Error clearing old suggestions:', deleteError);
+        } else {
+          console.log('🧹 Cleared old suggestions from database');
+        }
+      }
+    } catch (error) {
+      console.error('Error clearing suggestions:', error);
     }
 
     setIsChecking(true);
@@ -239,17 +261,26 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
       if (academicVoiceResponse.error) throw academicVoiceResponse.error;
 
       // This mapping is temporary to help with overlap detection
-      const grammarSuggestions = (grammarResponse.data?.suggestions || []).map((s: SuggestionType, index: number) => ({
-        id: `temp-grammar-${index}`,
-        ...s,
-        type: 'grammar' as const
-      }));
+      console.log('🤖 Grammar AI Response:', grammarResponse.data);
+      console.log('🎓 Academic Voice AI Response:', academicVoiceResponse.data);
+      
+      const grammarSuggestions = (grammarResponse.data?.suggestions || []).map((s: SuggestionType, index: number) => {
+        console.log('📝 Processing grammar suggestion:', s);
+        return {
+          id: `temp-grammar-${index}`,
+          ...s,
+          type: 'grammar' as const
+        };
+      });
 
-      const academicVoiceSuggestions = (academicVoiceResponse.data?.suggestions || []).map((s: SuggestionType, index: number) => ({
-        id: `temp-academic_voice-${index}`,
-        ...s,
-        type: 'academic_voice' as const
-      }));
+      const academicVoiceSuggestions = (academicVoiceResponse.data?.suggestions || []).map((s: SuggestionType, index: number) => {
+        console.log('🎓 Processing academic voice suggestion:', s);
+        return {
+          id: `temp-academic_voice-${index}`,
+          ...s,
+          type: 'academic_voice' as const
+        };
+      });
 
       // Combine and prioritize grammar suggestions over academic voice for overlapping text
       const allSuggestions: Omit<WritingSuggestion, 'id'>[] = [...grammarSuggestions];
@@ -304,13 +335,24 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
 
         if (insertError) throw insertError;
 
-        const uiSuggestions: WritingSuggestion[] = newSuggestions.map(s => ({
-          id: s.id,
-          original: s.original_text,
-          suggestion: s.suggested_text,
-          explanation: s.explanation,
-          type: s.type as 'grammar' | 'academic_voice',
-        }));
+        const uiSuggestions: WritingSuggestion[] = newSuggestions.map(s => {
+          console.log('🔄 Creating UI suggestion from DB:', {
+            id: s.id,
+            original_text: s.original_text,
+            original_text_type: typeof s.original_text,
+            suggested_text: s.suggested_text,
+            suggested_text_type: typeof s.suggested_text,
+            type: s.type
+          });
+          
+          return {
+            id: s.id,
+            original: s.original_text,
+            suggestion: s.suggested_text,
+            explanation: s.explanation,
+            type: s.type as 'grammar' | 'academic_voice',
+          };
+        });
 
         setWritingSuggestions(uiSuggestions);
         applySuggestionMarks(uiSuggestions);
@@ -337,9 +379,13 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
     if (occurrences.length === 0) {
       console.warn('❌ Could not find original text in document:', {
         original: suggestion.original,
+        originalType: typeof suggestion.original,
+        originalStringified: JSON.stringify(suggestion.original),
+        suggestion: suggestion.suggestion,
+        suggestionType: typeof suggestion.suggestion,
         textLength: text.length,
         textPreview: text.slice(0, 100) + '...',
-        suggestionType: suggestion.type
+        fullSuggestion: JSON.stringify(suggestion)
       });
       return;
     }
