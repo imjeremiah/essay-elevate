@@ -19,7 +19,7 @@ export async function login(formData: FormData) {
   });
 
   if (error) {
-    return redirect('/auth/login?message=Could not authenticate user');
+    return redirect('/login?message=Could not authenticate user');
   }
 
   return redirect('/dashboard');

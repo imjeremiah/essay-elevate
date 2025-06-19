@@ -27,12 +27,12 @@ export async function middleware(request: NextRequest) {
   // If a user is not logged in and is trying to access a protected route,
   // redirect them to the login page.
   if (!user && (pathname.startsWith('/dashboard') || pathname.startsWith('/editor'))) {
-    return NextResponse.redirect(new URL('/auth/login', request.url));
+    return NextResponse.redirect(new URL('/login', request.url));
   }
 
   // If a user is logged in and is trying to access an auth page (login/signup),
   // redirect them to the dashboard.
-  if (user && (pathname.startsWith('/auth/login') || pathname.startsWith('/auth/signup'))) {
+  if (user && (pathname.startsWith('/login') || pathname.startsWith('/signup'))) {
     return NextResponse.redirect(new URL('/dashboard', request.url));
   }
 

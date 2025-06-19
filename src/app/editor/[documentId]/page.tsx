@@ -21,19 +21,20 @@ interface EditorPageProps {
  */
 export default async function EditorPage({ params }: EditorPageProps) {
   const supabase = createClient();
+  const { documentId } = await params;
 
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
   if (!user) {
-    return redirect(`/auth/login?message=You must be logged in to edit a document`);
+    return redirect(`/login?message=You must be logged in to edit a document`);
   }
 
   const { data: document, error } = await supabase
     .from('documents')
     .select('*')
-    .eq('id', params.documentId)
+    .eq('id', documentId)
     .eq('user_id', user.id)
     .single();
 

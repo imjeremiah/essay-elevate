@@ -37,12 +37,12 @@ export default async function HomePage() {
         </div>
 
         <div className="flex flex-wrap items-center justify-around max-w-4xl mt-6 sm:w-full">
-          <Link href="/auth/login" passHref>
+          <Link href="/login" passHref>
             <Button variant="default" size="lg">
               Login
             </Button>
           </Link>
-          <Link href="/auth/signup" passHref>
+          <Link href="/signup" passHref>
             <Button variant="outline" size="lg" className="mt-4 sm:mt-0 sm:ml-4">
               Sign Up
             </Button>

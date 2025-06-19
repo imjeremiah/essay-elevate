@@ -16,7 +16,7 @@ export async function logout() {
     return redirect('/dashboard?message=Could not log out');
   }
 
-  return redirect('/auth/login');
+  return redirect('/login');
 }
 
 /**
@@ -31,7 +31,7 @@ export async function createDocument() {
 
   if (!user) {
     // This should not be possible if the page is protected by middleware
-    return redirect('/auth/login');
+    return redirect('/login');
   }
 
   const { data, error } = await supabase
@@ -64,7 +64,7 @@ export async function deleteDocument(documentId: string) {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    return redirect('/auth/login');
+    return redirect('/login');
   }
 
   // Verify the user owns the document before deleting
@@ -80,4 +80,47 @@ export async function deleteDocument(documentId: string) {
   }
 
   revalidatePath('/dashboard');
+}
+
+/**
+ * Renames a document by its ID.
+ * After renaming, it revalidates the dashboard path to refresh the list of documents.
+ * @param documentId The ID of the document to rename.
+ * @param newTitle The new title for the document.
+ */
+export async function renameDocument(
+  documentId: string,
+  newTitle: string,
+): Promise<{ error: string | null }> {
+  const supabase = createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    // This isn't strictly necessary due to RLS, but it's a good practice
+    // to have this check here as a quick exit path.
+    return { error: 'You must be logged in to rename a document.' };
+  }
+
+  if (!newTitle.trim()) {
+    return { error: 'Title cannot be empty.' };
+  }
+
+  // Verify the user owns the document before renaming
+  const { error } = await supabase
+    .from('documents')
+    .update({ title: newTitle.trim() })
+    .eq('id', documentId)
+    .eq('user_id', user.id);
+
+  if (error) {
+    console.error('Error renaming document:', error);
+    // In a real app, you would want to handle this error more gracefully
+    return { error: 'Could not rename document. Please try again.' };
+  }
+
+  revalidatePath('/dashboard');
+  return { error: null };
 }

@@ -54,7 +54,7 @@ export default async function DashboardPage() {
   if (!user) {
     // This should be handled by middleware, but it's a good practice
     // to have a safeguard here.
-    return redirect('/auth/login?message=You must be logged in to view this page');
+    return redirect('/login?message=You must be logged in to view this page');
   }
 
   const { data: documents, error } = await supabase

@@ -21,10 +21,10 @@ export async function signup(formData: FormData) {
 
   if (error) {
     console.error('Signup error:', error);
-    return redirect('/auth/signup?message=Could not authenticate user');
+    return redirect('/signup?message=Could not authenticate user');
   }
 
   return redirect(
-    '/auth/confirm?message=Check your email to continue the sign up process',
+    '/confirm?message=Check your email to continue the sign up process',
   );
 } 
