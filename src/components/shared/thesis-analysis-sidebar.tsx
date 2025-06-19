@@ -30,7 +30,7 @@ interface ThesisAnalysisData {
   alternatives: ThesisAlternative[];
 }
 
-interface ThesisAnalysisSidebarProps {
+export interface ThesisAnalysisSidebarProps {
   data: ThesisAnalysisData | null;
   isOpen: boolean;
   isLoading: boolean;

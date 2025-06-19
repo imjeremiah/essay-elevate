@@ -79,8 +79,14 @@ export const Suggestion = Mark.create<SuggestionOptions, SuggestionAttributes>({
   renderHTML({ mark, HTMLAttributes }) {
     const classNames = [
       'suggestion-mark',
-      mark.attrs.type === 'academic_voice' ? 'academic-voice' : '',
+      mark.attrs.type === 'academic_voice' ? 'academic-voice' : 'grammar',
     ].filter(Boolean).join(' ');
+
+    console.log('🎨 Rendering suggestion mark:', {
+      type: mark.attrs.type,
+      classNames,
+      original: mark.attrs.original
+    });
 
     return [
       'span',

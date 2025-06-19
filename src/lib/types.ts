@@ -10,7 +10,7 @@ export type Document = {
   id: string;
   user_id: string;
   title: string;
-  content: any | null; // JSON content from Tiptap editor
+  content: Record<string, unknown> | null; // JSON content from Tiptap editor
   created_at: string;
 };
 

@@ -1,40 +1,122 @@
 /**
  * Styles for the Tiptap editor, specifically for the suggestion marks.
+ * Updated with new Grammarly-inspired color system.
  */
+
+/* MOST IMPORTANT: Force suggestion marks to be visible */
+.ProseMirror span[data-suggestion] {
+  background-color: rgba(220, 38, 38, 0.15) !important;
+  border-bottom: 2px solid #dc2626 !important;
+  cursor: pointer !important;
+  border-radius: 2px !important;
+  padding: 1px 2px !important;
+  display: inline !important;
+  position: relative !important;
+}
+
+.ProseMirror span[data-suggestion][data-type="academic_voice"] {
+  background-color: rgba(59, 130, 246, 0.15) !important;
+  border-bottom: 2px solid #3b82f6 !important;
+}
+
+/* Base suggestion mark styling */
 .suggestion-mark {
-  background-color: rgba(220, 38, 38, 0.15); /* Light red background */
-  border-bottom: 2px solid #dc2626; /* Solid red underline for better visibility */
   cursor: pointer;
   transition: all 0.2s ease-in-out;
   border-radius: 2px;
   padding: 1px 2px;
+  position: relative;
+  display: inline;
 }
 
-.suggestion-mark:hover {
-  background-color: rgba(220, 38, 38, 0.3); /* Darker red on hover */
+/* Grammar suggestions - Red for correctness issues */
+.suggestion-mark.grammar {
+  background-color: rgba(220, 38, 38, 0.15) !important; /* Light red background */
+  border-bottom: 2px solid #dc2626 !important; /* Solid red underline */
+}
+
+.suggestion-mark.grammar:hover {
+  background-color: rgba(220, 38, 38, 0.25) !important; /* Darker red on hover */
   box-shadow: 0 1px 3px rgba(220, 38, 38, 0.3);
 }
 
-/* Academic voice suggestions - cautionary amber styling */
+/* Academic voice suggestions - Blue for clarity issues */
 .suggestion-mark.academic-voice {
-  background-color: rgba(245, 158, 11, 0.15); /* Light amber background */
-  border-bottom: 2px solid #f59e0b; /* Solid amber underline */
+  background-color: rgba(59, 130, 246, 0.15) !important; /* Light blue background */
+  border-bottom: 2px solid #3b82f6 !important; /* Solid blue underline */
 }
 
 .suggestion-mark.academic-voice:hover {
-  background-color: rgba(245, 158, 11, 0.3); /* Darker amber on hover */
-  box-shadow: 0 1px 3px rgba(245, 158, 11, 0.3);
+  background-color: rgba(59, 130, 246, 0.25) !important; /* Darker blue on hover */
+  box-shadow: 0 1px 3px rgba(59, 130, 246, 0.3);
 }
 
-/* You can add more styles for the ProseMirror editor container if needed */
+/* Default fallback - ensure all suggestions are visible */
+.suggestion-mark:not(.grammar):not(.academic-voice) {
+  background-color: rgba(220, 38, 38, 0.15) !important;
+  border-bottom: 2px solid #dc2626 !important;
+}
+
+/* Ensure marks are visible in all contexts */
+span[data-suggestion] {
+  background-color: rgba(220, 38, 38, 0.15) !important;
+  border-bottom: 2px solid #dc2626 !important;
+  cursor: pointer;
+  border-radius: 2px;
+  padding: 1px 2px;
+}
+
+span[data-suggestion][data-type="academic_voice"] {
+  background-color: rgba(59, 130, 246, 0.15) !important;
+  border-bottom: 2px solid #3b82f6 !important;
+}
+
+/* Fixed width editor container like Grammarly */
+.editor-container {
+  max-width: 65ch; /* Optimal reading width (about 650px) */
+  width: 100%;
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+
 .ProseMirror {
   min-height: 400px;
+  max-width: 100%; /* Constrain to container */
+  width: 100%;
   padding: 1rem;
   border: 1px solid hsl(var(--border));
   border-radius: var(--radius);
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  box-sizing: border-box;
+  /* Prevent horizontal expansion */
+  overflow-x: hidden;
+  font-size: 16px;
+  line-height: 1.6;
 }
 
 .ProseMirror:focus {
   outline: 2px solid hsl(var(--ring));
   outline-offset: 2px;
+}
+
+/* Ensure the prose styling doesn't override our width constraints */
+.prose {
+  max-width: none !important;
+  width: 100%;
+}
+
+/* Prevent any child elements from breaking out of the container */
+.ProseMirror * {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+/* Handle long words and URLs that might break layout */
+.ProseMirror p, 
+.ProseMirror div, 
+.ProseMirror span {
+  word-break: break-word;
+  overflow-wrap: break-word;
+  hyphens: auto;
 } 

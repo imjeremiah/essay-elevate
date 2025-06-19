@@ -9,7 +9,7 @@ import { notFound, redirect } from 'next/navigation';
 import { EditorClient } from './editor-client';
 
 interface EditorPageProps {
-  params: { documentId: string };
+  params: Promise<{ documentId: string }>;
 }
 
 /**

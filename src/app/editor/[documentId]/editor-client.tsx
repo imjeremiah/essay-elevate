@@ -13,21 +13,26 @@ import { EditorContent, useEditor } from '@tiptap/react';
 import { StarterKit } from '@tiptap/starter-kit';
 import { useCallback, useEffect, useState } from 'react';
 import { Suggestion } from '@/lib/editor/suggestion-extension';
-import { ThesisAnalysisSidebar } from '@/components/shared/thesis-analysis-sidebar';
-import { WritingSuggestionsSidebar } from '@/components/shared/writing-suggestions-sidebar';
-import { Target, FileText } from 'lucide-react';
+import { UnifiedSidebar, type WritingSuggestion } from '@/components/shared';
+import { Target, FileText, ArrowLeft } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import './editor-styles.css';
 
-interface WritingSuggestion {
-  id: string;
-  original: string;
-  suggestion: string;
-  explanation: string;
-  type: 'grammar' | 'academic_voice';
-  position?: {
-    start: number;
-    end: number;
+interface ThesisAnalysisData {
+  analysis: {
+    overall_score: number;
+    clarity_score: number;
+    specificity_score: number;
+    rigor_score: number;
+    strengths: string[];
+    weaknesses: string[];
+    feedback: string;
   };
+  alternatives: {
+    version: string;
+    text: string;
+    explanation: string;
+  }[];
 }
 
 /**
@@ -81,25 +86,27 @@ interface EditorClientProps {
  */
 export function EditorClient({ initialDocument }: EditorClientProps) {
   const supabase = createClient();
+  const router = useRouter();
   const [title, setTitle] = useState<string>(initialDocument.title);
   const debouncedTitle = useDebounce(title, 500);
 
   // State management
   const [isSaving, setIsSaving] = useState(false);
+  const [lastSavedAt, setLastSavedAt] = useState<Date>(new Date());
   const [isChecking, setIsChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastSavedContent, setLastSavedContent] = useState<string>(
     JSON.stringify(initialDocument.content || '')
   );
+  const [currentContent, setCurrentContent] = useState<string>(
+    JSON.stringify(initialDocument.content || '')
+  );
 
   // Writing suggestions state
-  const [showWritingSuggestions, setShowWritingSuggestions] = useState(false);
   const [writingSuggestions, setWritingSuggestions] = useState<WritingSuggestion[]>([]);
   
   // Thesis analysis state
-  const [showThesisAnalysis, setShowThesisAnalysis] = useState(false);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [thesisAnalysisData, setThesisAnalysisData] = useState<any>(null);
+  const [thesisAnalysisData, setThesisAnalysisData] = useState<ThesisAnalysisData | null>(null);
   const [isAnalyzingThesis, setIsAnalyzingThesis] = useState(false);
   const [selectedText, setSelectedText] = useState('');
 
@@ -123,6 +130,10 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
     onUpdate: ({ editor: editorInstance }) => {
       // Clear any existing suggestion marks when user types
       clearSuggestionMarks(editorInstance);
+      
+      // Update current content for auto-save
+      const content = editorInstance.getJSON();
+      setCurrentContent(JSON.stringify(content));
     },
   });
 
@@ -138,6 +149,52 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
       // Ignore errors when clearing suggestions
     }
   };
+
+  const applySuggestionMarks = useCallback((suggestions: WritingSuggestion[]) => {
+    if (!editor) return;
+    const { tr } = editor.state;
+    const docSize = editor.state.doc.content.size;
+    const docText = editor.state.doc.textContent;
+    
+    // Clear existing suggestion marks before applying new ones
+    tr.removeMark(0, docSize, editor.schema.marks.suggestion);
+    
+    suggestions.forEach((s: WritingSuggestion) => {
+      if (s.suggestion && s.original && s.explanation) {
+        // Find the first occurrence using our robust search function.
+        const occurrences = findOccurrences(docText, s.original);
+        
+        if (occurrences.length > 0) {
+          const { start, end } = occurrences[0];
+
+          // Tiptap positions are 1-based, so we convert from 0-based string indices.
+          const from = start + 1;
+          const to = end + 1;
+
+          if (from > 0 && to <= docSize + 1 && from < to) {
+            try {
+              const mark = editor.schema.marks.suggestion.create({
+                suggestion: s.suggestion,
+                original: s.original,
+                explanation: s.explanation,
+                type: s.type,
+              });
+              tr.addMark(from, to, mark);
+            } catch (markError) {
+              console.warn('Failed to apply suggestion mark:', { original: s.original, from, to, markError });
+            }
+          }
+        }
+      }
+    });
+    
+    editor.view.dispatch(tr);
+    
+    // Force a re-render to ensure marks are visible
+    setTimeout(() => {
+      editor.commands.focus();
+    }, 100);
+  }, [editor]);
 
   const checkWriting = useCallback(async () => {
     if (!editor) return;
@@ -160,93 +217,85 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
       if (grammarResponse.error) throw grammarResponse.error;
       if (academicVoiceResponse.error) throw academicVoiceResponse.error;
 
+      // This mapping is temporary to help with overlap detection
       const grammarSuggestions = (grammarResponse.data?.suggestions || []).map((s: SuggestionType, index: number) => ({
-        id: `grammar-${index}`,
+        id: `temp-grammar-${index}`,
         ...s,
         type: 'grammar' as const
       }));
 
       const academicVoiceSuggestions = (academicVoiceResponse.data?.suggestions || []).map((s: SuggestionType, index: number) => ({
-        id: `academic_voice-${index}`,
+        id: `temp-academic_voice-${index}`,
         ...s,
         type: 'academic_voice' as const
       }));
 
       // Combine and prioritize grammar suggestions over academic voice for overlapping text
-      const allSuggestions: WritingSuggestion[] = [...grammarSuggestions];
+      const allSuggestions: Omit<WritingSuggestion, 'id'>[] = [...grammarSuggestions];
       
-      // Only add academic voice suggestions that don't overlap with grammar suggestions
-      academicVoiceSuggestions.forEach(acadSuggestion => {
+      academicVoiceSuggestions.forEach((acadSuggestion: Omit<WritingSuggestion, 'id'>) => {
         const acadOccurrences = findOccurrences(text, acadSuggestion.original);
-        
         if (acadOccurrences.length > 0) {
           const acadRange = acadOccurrences[0];
-          
-          // Check if this range overlaps with any grammar suggestion
           const hasOverlap = grammarSuggestions.some(grammarSuggestion => {
             const grammarOccurrences = findOccurrences(text, grammarSuggestion.original);
             if (grammarOccurrences.length > 0) {
               const grammarRange = grammarOccurrences[0];
-              // Check for any overlap between ranges
               return !(acadRange.end <= grammarRange.start || acadRange.start >= grammarRange.end);
             }
             return false;
           });
-          
           if (!hasOverlap) {
             allSuggestions.push(acadSuggestion);
           }
         }
       });
 
-      console.log('🔍 Total suggestions found:', {
-        grammar: grammarSuggestions.length,
-        academicVoice: academicVoiceSuggestions.length,
-        final: allSuggestions.length
-      });
+      // Now, insert the finalized suggestions into the database
+      const user = (await supabase.auth.getUser()).data.user;
+      if (!user) throw new Error('User not authenticated');
 
-      // Update state and visual marks
-      setWritingSuggestions(allSuggestions);
+      const suggestionsToInsert = allSuggestions
+        .map(s => {
+          const occurrences = findOccurrences(text, s.original);
+          if (occurrences.length === 0) return null;
+          const { start, end } = occurrences[0];
 
-      if (allSuggestions.length > 0) {
-        const { tr } = editor.state;
-        const docSize = editor.state.doc.content.size;
-        const docText = editor.state.doc.textContent;
-        
-        // Clear existing suggestion marks before applying new ones
-        tr.removeMark(0, docSize, editor.schema.marks.suggestion);
-        
-        allSuggestions.forEach((s: WritingSuggestion) => {
-          if (s.suggestion && s.original && s.explanation) {
-            // Find the first occurrence using our robust search function.
-            const occurrences = findOccurrences(docText, s.original);
-            if (occurrences.length > 0) {
-              const { start, end } = occurrences[0];
+          return {
+            document_id: initialDocument.id,
+            user_id: user.id,
+            type: s.type,
+            original_text: s.original,
+            suggested_text: s.suggestion,
+            explanation: s.explanation,
+            position_start: start,
+            position_end: end,
+            status: 'pending' as const,
+          };
+        })
+        .filter(Boolean);
 
-              // Tiptap positions are 1-based, so we convert from 0-based string indices.
-              const from = start + 1;
-              const to = end + 1;
+      if (suggestionsToInsert.length > 0) {
+        const { data: newSuggestions, error: insertError } = await supabase
+          .from('suggestions')
+          .insert(suggestionsToInsert)
+          .select();
 
-              if (from > 0 && to <= docSize + 1 && from < to) {
-                try {
-                  tr.addMark(from, to, editor.schema.marks.suggestion.create({
-                    suggestion: s.suggestion,
-                    original: s.original,
-                    explanation: s.explanation,
-                    type: s.type,
-                  }));
-                } catch (markError) {
-                  console.warn('Failed to apply suggestion mark:', { original: s.original, from, to, markError });
-                }
-              }
-            }
-          }
-        });
-        
-        editor.view.dispatch(tr);
-        
-        // Show the suggestions sidebar
-        setShowWritingSuggestions(true);
+        if (insertError) throw insertError;
+
+        const uiSuggestions: WritingSuggestion[] = newSuggestions.map(s => ({
+          id: s.id,
+          original: s.original_text,
+          suggestion: s.suggested_text,
+          explanation: s.explanation,
+          type: s.type as 'grammar' | 'academic_voice',
+        }));
+
+        setWritingSuggestions(uiSuggestions);
+        applySuggestionMarks(uiSuggestions);
+      } else {
+        setWritingSuggestions([]);
+        clearSuggestionMarks(editor);
       }
     } catch (error) {
       console.error('Error checking writing:', error);
@@ -254,9 +303,9 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
     } finally {
       setIsChecking(false);
     }
-  }, [editor, supabase]);
+  }, [editor, supabase, initialDocument.id, applySuggestionMarks]);
 
-  const applySuggestion = (suggestion: WritingSuggestion) => {
+  const applySuggestion = async (suggestion: WritingSuggestion) => {
     if (!editor) return;
 
     const { state } = editor;
@@ -275,6 +324,18 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
     const tipTapEnd = targetOccurrence.end + 1;
     
     try {
+      // Update suggestion status in the database
+      const { error: updateError } = await supabase
+        .from('suggestions')
+        .update({ status: 'accepted' })
+        .eq('id', suggestion.id);
+      
+      if (updateError) {
+        console.error('Failed to update suggestion status:', updateError);
+        // Optionally, prevent the UI change if DB update fails
+        return;
+      }
+
       // Replace the text
       const result = editor
         .chain()
@@ -286,12 +347,15 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
       
       if (result) {
         // Remove the applied suggestion from the list
-        setWritingSuggestions(prev => prev.filter(s => s.id !== suggestion.id));
+        const remainingSuggestions = writingSuggestions.filter(s => s.id !== suggestion.id);
+        setWritingSuggestions(remainingSuggestions);
         
         // Clear all suggestion marks and reapply remaining ones
         setTimeout(() => {
-          if (writingSuggestions.filter(s => s.id !== suggestion.id).length === 0) {
+          if (remainingSuggestions.length === 0) {
             clearSuggestionMarks(editor);
+          } else {
+            applySuggestionMarks(remainingSuggestions);
           }
         }, 100);
       }
@@ -307,23 +371,60 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
     });
   };
 
-  const dismissSuggestion = (suggestionId: string) => {
-    setWritingSuggestions(prev => prev.filter(s => s.id !== suggestionId));
+  const dismissSuggestion = async (suggestionId: string) => {
+    // Update status in the database first
+    const { error: updateError } = await supabase
+      .from('suggestions')
+      .update({ status: 'rejected' })
+      .eq('id', suggestionId);
+    
+    if (updateError) {
+      console.error('Failed to update suggestion status:', updateError);
+      return; // Stop if the DB update fails
+    }
+
+    const remainingSuggestions = writingSuggestions.filter(s => s.id !== suggestionId);
+    setWritingSuggestions(remainingSuggestions);
     
     // If no suggestions remain, clear visual marks
-    if (writingSuggestions.length === 1) {
+    if (remainingSuggestions.length === 0) {
       if (editor) {
         clearSuggestionMarks(editor);
+      }
+    } else {
+      if (editor) {
+        // Re-apply marks for the remaining suggestions
+        applySuggestionMarks(remainingSuggestions);
       }
     }
   };
 
-  const dismissAllSuggestionsOfType = (suggestionType: 'grammar' | 'academic_voice') => {
-    setWritingSuggestions(prev => prev.filter(s => s.type !== suggestionType));
+  const dismissAllSuggestionsOfType = async (suggestionType: 'grammar' | 'academic_voice') => {
+    const suggestionsToDismiss = writingSuggestions.filter(s => s.type === suggestionType);
+    const suggestionIdsToDismiss = suggestionsToDismiss.map(s => s.id);
+
+    if (suggestionIdsToDismiss.length > 0) {
+      const { error: updateError } = await supabase
+        .from('suggestions')
+        .update({ status: 'rejected' })
+        .in('id', suggestionIdsToDismiss);
+
+      if (updateError) {
+        console.error('Failed to dismiss all suggestions of type:', updateError);
+        return;
+      }
+    }
+    
+    const remainingSuggestions = writingSuggestions.filter(s => s.type !== suggestionType);
+    setWritingSuggestions(remainingSuggestions);
     
     // Clear and reapply marks for remaining suggestions
     if (editor) {
-      clearSuggestionMarks(editor);
+      if (remainingSuggestions.length > 0) {
+        applySuggestionMarks(remainingSuggestions);
+      } else {
+        clearSuggestionMarks(editor);
+      }
     }
   };
 
@@ -335,7 +436,7 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
     }
 
     setIsAnalyzingThesis(true);
-    setShowThesisAnalysis(true);
+    // Sidebar is always visible now, no need to show/hide
 
     try {
       const response = await supabase.functions.invoke('thesis-analyzer', {
@@ -378,13 +479,11 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
     const saveDocument = async () => {
       if (!editor) return;
 
-      const content = editor.getJSON();
-      const contentString = JSON.stringify(content);
-
-      if (contentString === lastSavedContent) return;
+      if (currentContent === lastSavedContent) return;
 
       setIsSaving(true);
       try {
+        const content = JSON.parse(currentContent);
         const { error } = await supabase
           .from('documents')
           .update({ content })
@@ -392,7 +491,8 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
 
         if (error) throw error;
 
-        setLastSavedContent(contentString);
+        setLastSavedContent(currentContent);
+        setLastSavedAt(new Date());
         setError(null);
       } catch (error) {
         console.error('Error saving document:', error);
@@ -404,7 +504,7 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
 
     const debouncedSave = setTimeout(saveDocument, 1000);
     return () => clearTimeout(debouncedSave);
-  }, [editor, supabase, initialDocument.id, lastSavedContent]);
+  }, [currentContent, supabase, initialDocument.id, lastSavedContent, editor]);
 
   // Auto-save title
   useEffect(() => {
@@ -418,6 +518,7 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
           .eq('id', initialDocument.id);
 
         if (error) throw error;
+        setLastSavedAt(new Date());
         setError(null);
       } catch (error) {
         console.error('Error saving title:', error);
@@ -430,6 +531,13 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
     }
   }, [debouncedTitle, supabase, initialDocument.id, initialDocument.title]);
 
+  /**
+   * Handles navigation back to the dashboard
+   */
+  const handleBackToDashboard = () => {
+    router.push('/dashboard');
+  };
+
   if (!editor) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -439,105 +547,108 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
   }
 
   return (
-  <div className="flex h-screen bg-gradient-to-br from-slate-50 to-white">
-    <div className="flex-1 flex flex-col">
-      {/* Header */}
-      <div className="border-b border-gray-200 bg-white/80 backdrop-blur-sm p-4">
-        <div className="flex items-center justify-between">
-          <input
-            type="text"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            className="text-xl font-semibold bg-transparent border-none outline-none flex-1"
-            placeholder="Untitled Document"
-          />
-          <div className="flex items-center gap-3">
-            <span className="text-sm text-gray-500">
-              {isSaving ? 'Saving...' : 'Saved'}
-            </span>
-            
-            {/* Manual Check Writing Button */}
-            <Button
-              onClick={checkWriting}
-              disabled={isChecking}
-              variant="outline"
-              size="sm"
-              className="flex items-center gap-2"
-            >
-              {isChecking ? (
-                <>
-                  <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
-                  Checking...
-                </>
-              ) : (
-                <>
-                  <FileText className="h-4 w-4" />
-                  Check Writing
-                </>
-              )}
-            </Button>
-
-            {/* Analyze Thesis Button */}
-            {selectedText.trim() && (
-              <Button 
-                onClick={analyzeThesis}
-                disabled={isAnalyzingThesis}
+    <div className="grid grid-cols-[1fr_320px] h-screen bg-gradient-to-br from-slate-50 to-white">
+      {/* Main Editor Area */}
+      <div className="flex flex-col min-w-0"> {/* min-w-0 prevents flex child from growing */}
+        {/* Header */}
+        <div className="border-b border-gray-200 bg-white/80 backdrop-blur-sm p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3 flex-1 min-w-0">
+              <Button
+                onClick={handleBackToDashboard}
+                variant="ghost"
+                size="sm"
+                className="flex items-center gap-2 text-gray-600 hover:text-gray-900"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                Dashboard
+              </Button>
+              <input
+                type="text"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                className="text-xl font-semibold bg-transparent border-none outline-none flex-1 min-w-0"
+                placeholder="Untitled Document"
+              />
+            </div>
+            <div className="flex items-center gap-3 flex-shrink-0">
+              <span className={`text-sm ${isSaving ? 'text-blue-600' : 'text-gray-500'}`}>
+                {isSaving ? 'Saving...' : `Saved ${lastSavedAt.toLocaleTimeString()}`}
+              </span>
+              
+              {/* Manual Check Writing Button */}
+              <Button
+                onClick={checkWriting}
+                disabled={isChecking}
                 variant="outline"
                 size="sm"
                 className="flex items-center gap-2"
               >
-                {isAnalyzingThesis ? (
+                {isChecking ? (
                   <>
                     <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
-                    Analyzing...
+                    Checking...
                   </>
                 ) : (
                   <>
-                    <Target className="h-4 w-4" />
-                    Analyze Thesis
+                    <FileText className="h-4 w-4" />
+                    Check Writing
                   </>
                 )}
               </Button>
-            )}
+
+              {/* Analyze Thesis Button */}
+              {selectedText.trim() && (
+                <Button 
+                  onClick={analyzeThesis}
+                  disabled={isAnalyzingThesis}
+                  variant="outline"
+                  size="sm"
+                  className="flex items-center gap-2"
+                >
+                  {isAnalyzingThesis ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                      Analyzing...
+                    </>
+                  ) : (
+                    <>
+                      <Target className="h-4 w-4" />
+                      Analyze Thesis
+                    </>
+                  )}
+                </Button>
+              )}
+            </div>
           </div>
+
+          {error && (
+            <div className="mt-2 text-sm text-red-600 bg-red-50 p-2 rounded">
+              {error}
+            </div>
+          )}
         </div>
 
-        {error && (
-          <div className="mt-2 text-sm text-red-600 bg-red-50 p-2 rounded">
-            {error}
+        {/* Editor */}
+        <div className="flex-1 p-6 overflow-auto min-w-0"> {/* min-w-0 prevents overflow */}
+          <div className="editor-container max-w-[65ch] mx-auto"> {/* Fixed width container */}
+            <EditorContent editor={editor} className="prose dark:prose-invert max-w-none" />
           </div>
-        )}
+        </div>
       </div>
-
-      {/* Editor */}
-      <div className="flex-1 p-6 overflow-auto">
-        <EditorContent editor={editor} className="prose dark:prose-invert max-w-none" />
-      </div>
+      
+      {/* Unified Sidebar */}
+      <UnifiedSidebar
+        suggestions={writingSuggestions}
+        isCheckingWriting={isChecking}
+        onApplySuggestion={applySuggestion}
+        onApplyAllOfType={applyAllSuggestionsOfType}
+        onDismissSuggestion={dismissSuggestion}
+        onDismissAllOfType={dismissAllSuggestionsOfType}
+        thesisData={thesisAnalysisData}
+        isAnalyzingThesis={isAnalyzingThesis}
+        onApplyThesisAlternative={applyThesisAlternative}
+      />
     </div>
-    
-    {/* Writing Suggestions Sidebar */}
-    <WritingSuggestionsSidebar
-      suggestions={writingSuggestions}
-      isOpen={showWritingSuggestions}
-      isLoading={isChecking}
-      onClose={() => setShowWritingSuggestions(false)}
-      onApplySuggestion={applySuggestion}
-      onApplyAllOfType={applyAllSuggestionsOfType}
-      onDismissSuggestion={dismissSuggestion}
-      onDismissAllOfType={dismissAllSuggestionsOfType}
-    />
-    
-    {/* Thesis Analysis Sidebar */}
-    <ThesisAnalysisSidebar
-      data={thesisAnalysisData}
-      isOpen={showThesisAnalysis}
-      isLoading={isAnalyzingThesis}
-      onClose={() => {
-        setShowThesisAnalysis(false);
-        setThesisAnalysisData(null);
-      }}
-      onApplyAlternative={applyThesisAlternative}
-    />
-  </div>
   );
 } 

@@ -21,7 +21,7 @@ interface WritingSuggestion {
   };
 }
 
-interface WritingSuggestionsSidebarProps {
+export interface WritingSuggestionsSidebarProps {
   suggestions: WritingSuggestion[];
   isOpen: boolean;
   isLoading: boolean;
