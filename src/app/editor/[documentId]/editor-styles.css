@@ -1,0 +1,26 @@
+/**
+ * Styles for the Tiptap editor, specifically for the suggestion marks.
+ */
+.suggestion-mark {
+  background-color: rgba(255, 255, 0, 0.2); /* Light yellow background */
+  border-bottom: 2px solid rgba(255, 180, 0, 0.7); /* Orange-yellow underline */
+  cursor: pointer;
+  transition: background-color 0.2s ease-in-out;
+}
+
+.suggestion-mark:hover {
+  background-color: rgba(255, 255, 0, 0.4); /* Darker yellow on hover */
+}
+
+/* You can add more styles for the ProseMirror editor container if needed */
+.ProseMirror {
+  min-height: 400px;
+  padding: 1rem;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+}
+
+.ProseMirror:focus {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+} 

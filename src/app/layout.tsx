@@ -1,31 +1,46 @@
-import type { Metadata } from "next";
-import { Inter, Lora } from "next/font/google";
-import "@/styles/globals.css";
+import { Inter, Lora } from 'next/font/google';
+import { cn } from '@/lib/utils';
+import '../styles/globals.css';
 
 const fontSans = Inter({
-  subsets: ["latin"],
-  variable: "--font-sans",
+  subsets: ['latin'],
+  variable: '--font-sans',
 });
 
 const fontSerif = Lora({
-  subsets: ["latin"],
-  variable: "--font-serif",
+  subsets: ['latin'],
+  variable: '--font-serif',
 });
 
-export const metadata: Metadata = {
-  title: "EssayElevate",
-  description: "Elevate your writing with AI-powered feedback.",
+const defaultUrl = process.env.VERCEL_URL
+  ? `https://${process.env.VERCEL_URL}`
+  : 'http://localhost:3000';
+
+export const metadata = {
+  metadataBase: new URL(defaultUrl),
+  title: 'Next.js and Supabase Starter Kit',
+  description: 'The fastest way to build apps with Next.js and Supabase',
 };
 
 export default function RootLayout({
   children,
-}: Readonly<{
+}: {
   children: React.ReactNode;
-}>) {
+}) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body className={`${fontSans.variable} ${fontSerif.variable}`}>
-        {children}
+    <html
+      lang="en"
+      className={cn(
+        'min-h-screen bg-background font-sans antialiased',
+        fontSans.variable,
+        fontSerif.variable
+      )}
+      suppressHydrationWarning
+    >
+      <body className="bg-background text-foreground" suppressHydrationWarning>
+        <main className="flex flex-col items-center min-h-screen">
+          {children}
+        </main>
       </body>
     </html>
   );
