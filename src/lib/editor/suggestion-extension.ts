@@ -12,6 +12,7 @@ export interface SuggestionAttributes {
   suggestion?: string;
   explanation?: string;
   original?: string;
+  type?: string;
 }
 
 declare module '@tiptap/core' {
@@ -53,6 +54,9 @@ export const Suggestion = Mark.create<SuggestionOptions, SuggestionAttributes>({
       original: {
         default: null,
       },
+      type: {
+        default: 'grammar',
+      },
     };
   },
 
@@ -65,19 +69,27 @@ export const Suggestion = Mark.create<SuggestionOptions, SuggestionAttributes>({
           const suggestion = (node as HTMLElement).getAttribute('data-suggestion');
           const explanation = (node as HTMLElement).getAttribute('data-explanation');
           const original = (node as HTMLElement).getAttribute('data-original');
-          return { suggestion, explanation, original };
+          const type = (node as HTMLElement).getAttribute('data-type') || 'grammar';
+          return { suggestion, explanation, original, type };
         },
       },
     ];
   },
 
   renderHTML({ mark, HTMLAttributes }) {
+    const classNames = [
+      'suggestion-mark',
+      mark.attrs.type === 'academic_voice' ? 'academic-voice' : '',
+    ].filter(Boolean).join(' ');
+
     return [
       'span',
       mergeAttributes(this.options.HTMLAttributes, HTMLAttributes, {
         'data-suggestion': mark.attrs.suggestion,
         'data-explanation': mark.attrs.explanation,
         'data-original': mark.attrs.original,
+        'data-type': mark.attrs.type,
+        class: classNames,
       }),
       0,
     ];

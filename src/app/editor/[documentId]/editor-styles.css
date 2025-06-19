@@ -15,6 +15,17 @@
   box-shadow: 0 1px 3px rgba(220, 38, 38, 0.3);
 }
 
+/* Academic voice suggestions - cautionary amber styling */
+.suggestion-mark.academic-voice {
+  background-color: rgba(245, 158, 11, 0.15); /* Light amber background */
+  border-bottom: 2px solid #f59e0b; /* Solid amber underline */
+}
+
+.suggestion-mark.academic-voice:hover {
+  background-color: rgba(245, 158, 11, 0.3); /* Darker amber on hover */
+  box-shadow: 0 1px 3px rgba(245, 158, 11, 0.3);
+}
+
 /* You can add more styles for the ProseMirror editor container if needed */
 .ProseMirror {
   min-height: 400px;

@@ -1,8 +1,7 @@
 /**
- * @file This Edge Function acts as a proxy to the OpenAI API for grammar checking.
- * It takes a text input, sends it to OpenAI with a specific prompt for
- * grammar and spelling correction, and returns a structured JSON response
- * with suggestions.
+ * @file This Edge Function identifies casual language in academic writing
+ * and provides more sophisticated, academic alternatives. It focuses on
+ * elevating informal phrases to maintain scholarly tone.
  */
 
 import { corsHeaders } from '../_shared/cors.ts';
@@ -34,42 +33,51 @@ Deno.serve(async req => {
       });
     }
 
-    // Call the OpenAI API to get grammar and spelling suggestions.
+    // Call the OpenAI API to get academic voice suggestions.
     const completion = await openAI.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [
         {
           role: 'system',
-          content: `You are a helpful writing tutor for high school students. Your job is to find clear grammar and spelling mistakes and suggest simple fixes.
+          content: `You are a friendly writing coach helping high school students write more formally for school essays. Your job is to spot casual language and suggest more formal alternatives.
 
-FOCUS ON THESE COMMON MISTAKES:
-1. **Spelling errors:** misspelled words
-2. **Basic grammar:** wrong verb forms, subject-verb agreement
-3. **Common mix-ups:** "there/their/they're", "to/too/two", "your/you're"
-4. **Simple tense errors:** "I have went" should be "I went"
+LOOK FOR THESE CASUAL PHRASES:
+1. **Contractions:** "don't" → "do not", "can't" → "cannot", "it's" → "it is"
+2. **Casual connectors:** "but" → "however", "so" → "therefore"
+3. **Informal phrases:** "a lot of" → "many", "really good" → "effective"
+4. **Personal opinions:** "I think" → "This suggests", "I believe" → "The evidence shows"
+5. **Casual words:** "stuff" → "things", "guys" → "people", "totally" → "completely"
 
-KEEP IT SIMPLE:
-- Use friendly, easy-to-understand explanations
-- Only flag obvious mistakes that any teacher would mark wrong
-- Don't worry about complex grammar rules
-- If you're not sure it's wrong, don't suggest a change
-
-IMPORTANT: If text is already correct, return empty suggestions array.
+KEEP IT STUDENT-FRIENDLY:
+- Only suggest changes that make writing sound more formal for school
+- Use simple explanations a high schooler would understand
+- Don't make it sound like a college textbook
+- If the writing is already appropriately formal, suggest nothing
 
 JSON-ONLY OUTPUT:
 Return ONLY a valid JSON object: { "suggestions": [...] }
 Each suggestion needs: { "original": string, "suggestion": string, "explanation": string }
-If no mistakes found, return: { "suggestions": [] }
+If no casual language found, return: { "suggestions": [] }
 
 Example:
-Text: "I have went to the store yesterday."
+Text: "There's a lot of evidence that shows this theory is pretty good."
 Response:
 {
   "suggestions": [
     {
-      "original": "have went",
-      "suggestion": "went",
-      "explanation": "Use simple past tense for actions that happened yesterday."
+      "original": "There's",
+      "suggestion": "There is",
+      "explanation": "Avoid contractions in formal school writing."
+    },
+    {
+      "original": "a lot of",
+      "suggestion": "much",
+      "explanation": "Use more formal language instead of casual phrases."
+    },
+    {
+      "original": "pretty good",
+      "suggestion": "effective",
+      "explanation": "Choose more specific words instead of casual descriptors."
     }
   ]
 }`,
@@ -100,7 +108,7 @@ Response:
       throw new Error('Could not parse response from AI.');
     }
   } catch (error) {
-    console.error('Error in grammar-check function:', error);
+    console.error('Error in academic-voice function:', error);
     return new Response(JSON.stringify({ error: error.message }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

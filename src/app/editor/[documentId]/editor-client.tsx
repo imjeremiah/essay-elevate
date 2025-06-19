@@ -13,7 +13,22 @@ import { EditorContent, useEditor, BubbleMenu } from '@tiptap/react';
 import { StarterKit } from '@tiptap/starter-kit';
 import { useCallback, useEffect, useState, useRef } from 'react';
 import { Suggestion } from '@/lib/editor/suggestion-extension';
+import { ThesisAnalysisSidebar } from '@/components/shared/thesis-analysis-sidebar';
+import { WritingSuggestionsSidebar } from '@/components/shared/writing-suggestions-sidebar';
+import { Target, FileText } from 'lucide-react';
 import './editor-styles.css';
+
+interface WritingSuggestion {
+  id: string;
+  original: string;
+  suggestion: string;
+  explanation: string;
+  type: 'grammar' | 'academic_voice';
+  position?: {
+    start: number;
+    end: number;
+  };
+}
 
 /**
  * Escapes special characters in a string for use in a regular expression.
@@ -26,31 +41,33 @@ function escapeRegExp(str: string): string {
 }
 
 /**
- * Finds all occurrences of a needle in a haystack, ignoring whitespace differences.
- * @param {string} haystack - The text to search within.
- * @param {string} needle - The text to search for.
- * @returns {Array<{start: number, end: number}>} An array of found occurrences.
+ * Finds all occurrences of a substring in a text, using word boundaries for single words.
+ * @param {string} text - The full text to search in.
+ * @param {string} target - The substring to find.
+ * @returns {Array} An array of objects with start and end positions.
  */
-function findOccurrences(haystack: string, needle: string) {
-  const results: { start: number; end: number }[] = [];
-  if (!needle) return results;
-
-  try {
-    const escapedNeedle = escapeRegExp(needle.trim());
-    const regex = new RegExp(escapedNeedle.replace(/\s+/g, '\\s+'), 'gu');
-    
-    let match;
-    while ((match = regex.exec(haystack)) !== null) {
-      results.push({
-        start: match.index,
-        end: match.index + match[0].length,
-      });
+function findOccurrences(text: string, target: string): Array<{ start: number; end: number }> {
+  const occurrences: Array<{ start: number; end: number }> = [];
+  const escapedTarget = escapeRegExp(target);
+  
+  // Use word boundaries for single words to avoid partial matches
+  const isSingleWord = !target.includes(' ') && target.length > 2;
+  const pattern = isSingleWord ? `\\b${escapedTarget}\\b` : escapedTarget;
+  const regex = new RegExp(pattern, 'gi');
+  
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    occurrences.push({
+      start: match.index,
+      end: match.index + match[0].length,
+    });
+    // Prevent infinite loop for zero-length matches
+    if (match.index === regex.lastIndex) {
+      regex.lastIndex++;
     }
-  } catch (e) {
-    console.error(`Error creating regex for search: "${needle}"`, e);
   }
-
-  return results;
+  
+  return occurrences;
 }
 
 interface EditorClientProps {
@@ -67,23 +84,23 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
   const [title, setTitle] = useState<string>(initialDocument.title);
   const debouncedTitle = useDebounce(title, 500);
 
-  // useRef to hold the timeout for debouncing the grammar check
-  const grammarCheckTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const isApplyingSuggestionsRef = useRef(false);
-
+  // State management
   const [isSaving, setIsSaving] = useState(false);
   const [isChecking, setIsChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastSavedContent, setLastSavedContent] = useState<string>(
     JSON.stringify(initialDocument.content || '')
   );
-  const [showSuggestionPopup, setShowSuggestionPopup] = useState(false);
-  const [currentSuggestion, setCurrentSuggestion] = useState<{
-    suggestion: string;
-    explanation: string;
-    original: string;
-  } | null>(null);
-  const [isAcceptingSuggestion, setIsAcceptingSuggestion] = useState(false);
+
+  // Writing suggestions state
+  const [showWritingSuggestions, setShowWritingSuggestions] = useState(false);
+  const [writingSuggestions, setWritingSuggestions] = useState<WritingSuggestion[]>([]);
+  
+  // Thesis analysis state
+  const [showThesisAnalysis, setShowThesisAnalysis] = useState(false);
+  const [thesisAnalysisData, setThesisAnalysisData] = useState<any>(null);
+  const [isAnalyzingThesis, setIsAnalyzingThesis] = useState(false);
+  const [selectedText, setSelectedText] = useState('');
 
   const editor = useEditor({
     extensions: [
@@ -97,81 +114,107 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
     content: initialDocument.content || '',
     immediatelyRender: false, // Fix for Tiptap SSR warning
     onSelectionUpdate: ({ editor: editorInstance }) => {
-      // Check if cursor is in a suggestion mark
-      const attrs = editorInstance.getAttributes('suggestion');
-      if (attrs && attrs.suggestion) {
-        setCurrentSuggestion({
-          suggestion: attrs.suggestion,
-          explanation: attrs.explanation,
-          original: attrs.original,
-        });
-        setShowSuggestionPopup(true);
-      } else {
-        setShowSuggestionPopup(false);
-        setCurrentSuggestion(null);
-      }
+      // Update selected text for thesis analysis
+      const { from, to } = editorInstance.state.selection;
+      const selectedText = editorInstance.state.doc.textBetween(from, to, ' ');
+      setSelectedText(selectedText);
     },
     onUpdate: ({ editor: editorInstance }) => {
-      // Skip grammar check if we're currently applying suggestions
-      if (isApplyingSuggestionsRef.current) {
-        return;
-      }
-      
-      // Clear the existing timeout
-      if (grammarCheckTimeoutRef.current) {
-        clearTimeout(grammarCheckTimeoutRef.current);
-      }
-      // Set a new timeout to debounce the grammar check
-      grammarCheckTimeoutRef.current = setTimeout(() => {
-        checkGrammar(editorInstance);
-      }, 2000); // 2-second debounce delay
-    },
-    onCreate: ({ editor: editorInstance }) => {
-      // Wait a bit for the editor to fully initialize before first grammar check
-      setTimeout(() => {
-        checkGrammar(editorInstance);
-      }, 1000);
+      // Clear any existing suggestion marks when user types
+      clearSuggestionMarks(editorInstance);
     },
   });
 
-  const checkGrammar = useCallback(async (editorInstance: any) => {
-    // Guard clause to ensure editor exists
-    if (!editorInstance) return;
+  // Clear suggestion marks helper
+  const clearSuggestionMarks = (editorInstance: any) => {
+    try {
+      const { tr } = editorInstance.state;
+      const docSize = editorInstance.state.doc.content.size;
+      tr.removeMark(0, docSize, editorInstance.schema.marks.suggestion);
+      editorInstance.view.dispatch(tr);
+    } catch (e) {
+      // Ignore errors when clearing suggestions
+    }
+  };
 
-    const text = editorInstance.getText();
+  const checkWriting = useCallback(async () => {
+    if (!editor) return;
+
+    const text = editor.getText();
     if (!text.trim()) {
-      // Clear existing suggestions if text is empty
-      try {
-        const { tr } = editorInstance.state;
-        const docSize = editorInstance.state.doc.content.size;
-        tr.removeMark(0, docSize, editorInstance.schema.marks.suggestion);
-        editorInstance.view.dispatch(tr);
-      } catch (e) {
-        // Ignore errors when clearing suggestions
-      }
+      clearSuggestionMarks(editor);
+      setWritingSuggestions([]);
       return;
     }
 
     setIsChecking(true);
     try {
-      const { data, error: invokeError } = await supabase.functions.invoke(
-        'grammar-check',
-        { body: { text } },
-      );
+      // Run both grammar check and academic voice check in parallel
+      const [grammarResponse, academicVoiceResponse] = await Promise.all([
+        supabase.functions.invoke('grammar-check', { body: { text } }),
+        supabase.functions.invoke('academic-voice', { body: { text } }),
+      ]);
 
-      if (invokeError) throw invokeError;
+      if (grammarResponse.error) throw grammarResponse.error;
+      if (academicVoiceResponse.error) throw academicVoiceResponse.error;
 
-      if (data.suggestions && Array.isArray(data.suggestions)) {
-        isApplyingSuggestionsRef.current = true;
+      const grammarSuggestions = (grammarResponse.data?.suggestions || []).map((s: SuggestionType, index: number) => ({
+        id: `grammar-${index}`,
+        ...s,
+        type: 'grammar' as const
+      }));
+
+      const academicVoiceSuggestions = (academicVoiceResponse.data?.suggestions || []).map((s: SuggestionType, index: number) => ({
+        id: `academic_voice-${index}`,
+        ...s,
+        type: 'academic_voice' as const
+      }));
+
+      // Combine and prioritize grammar suggestions over academic voice for overlapping text
+      const allSuggestions: WritingSuggestion[] = [...grammarSuggestions];
+      
+      // Only add academic voice suggestions that don't overlap with grammar suggestions
+      academicVoiceSuggestions.forEach(acadSuggestion => {
+        const acadOccurrences = findOccurrences(text, acadSuggestion.original);
         
-        const { tr } = editorInstance.state;
-        const docSize = editorInstance.state.doc.content.size;
-        const docText = editorInstance.state.doc.textContent;
+        if (acadOccurrences.length > 0) {
+          const acadRange = acadOccurrences[0];
+          
+          // Check if this range overlaps with any grammar suggestion
+          const hasOverlap = grammarSuggestions.some(grammarSuggestion => {
+            const grammarOccurrences = findOccurrences(text, grammarSuggestion.original);
+            if (grammarOccurrences.length > 0) {
+              const grammarRange = grammarOccurrences[0];
+              // Check for any overlap between ranges
+              return !(acadRange.end <= grammarRange.start || acadRange.start >= grammarRange.end);
+            }
+            return false;
+          });
+          
+          if (!hasOverlap) {
+            allSuggestions.push(acadSuggestion);
+          }
+        }
+      });
+
+      console.log('🔍 Total suggestions found:', {
+        grammar: grammarSuggestions.length,
+        academicVoice: academicVoiceSuggestions.length,
+        final: allSuggestions.length
+      });
+
+      // Update state and visual marks
+      setWritingSuggestions(allSuggestions);
+
+      if (allSuggestions.length > 0) {
+        const { tr } = editor.state;
+        const docSize = editor.state.doc.content.size;
+        const docText = editor.state.doc.textContent;
         
         // Clear existing suggestion marks before applying new ones
-        tr.removeMark(0, docSize, editorInstance.schema.marks.suggestion);
+        tr.removeMark(0, docSize, editor.schema.marks.suggestion);
         
-        data.suggestions.forEach((s: SuggestionType) => {
+        allSuggestions.forEach((s: WritingSuggestion) => {
           if (s.suggestion && s.original && s.explanation) {
             // Find the first occurrence using our robust search function.
             const occurrences = findOccurrences(docText, s.original);
@@ -184,243 +227,318 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
 
               if (from > 0 && to <= docSize + 1 && from < to) {
                 try {
-                  tr.addMark(from, to, editorInstance.schema.marks.suggestion.create({
+                  tr.addMark(from, to, editor.schema.marks.suggestion.create({
                     suggestion: s.suggestion,
                     original: s.original,
                     explanation: s.explanation,
+                    type: s.type,
                   }));
                 } catch (markError) {
                   console.warn('Failed to apply suggestion mark:', { original: s.original, from, to, markError });
                 }
-              } else {
-                console.warn('Calculated suggestion positions out of bounds:', { original: s.original, from, to, docSize });
               }
-            } else {
-              console.warn(`Could not find original text in document: "${s.original}"`);
             }
           }
         });
         
-        editorInstance.view.dispatch(tr);
+        editor.view.dispatch(tr);
         
-        setTimeout(() => {
-          isApplyingSuggestionsRef.current = false;
-        }, 100);
+        // Show the suggestions sidebar
+        setShowWritingSuggestions(true);
       }
-    } catch (e) {
-      console.error('Error checking grammar:', e);
-      setError('Could not check grammar.');
+    } catch (error) {
+      console.error('Error checking writing:', error);
+      setError('Failed to check writing. Please try again.');
     } finally {
       setIsChecking(false);
     }
-  }, [supabase.functions]);
+  }, [editor, supabase]);
 
-  const saveDocument = useCallback(async () => {
+  const applySuggestion = (suggestion: WritingSuggestion) => {
     if (!editor) return;
 
-    const contentJSON = editor.getJSON();
-    const contentString = JSON.stringify(contentJSON);
-    
-    // Only save if content or title has actually changed
-    if (contentString === lastSavedContent && debouncedTitle === initialDocument.title) {
-      return;
-    }
-
-    setIsSaving(true);
-
-    const { error: updateError } = await supabase
-      .from('documents')
-      .update({ title: debouncedTitle, content: contentJSON })
-      .eq('id', initialDocument.id);
-
-    if (updateError) {
-      console.error('Error saving document:', updateError);
-      setError('Could not save changes.');
-    } else {
-      setError(null);
-      setLastSavedContent(contentString);
-    }
-    setIsSaving(false);
-  }, [editor, supabase, debouncedTitle, initialDocument.id, initialDocument.title, lastSavedContent]);
-
-  const debouncedEditorState = useDebounce(editor?.state.doc.toJSON(), 1000);
-
-  useEffect(() => {
-    if (debouncedEditorState && editor) {
-      saveDocument();
-    }
-  }, [debouncedEditorState, saveDocument]);
-
-  // Separate effect for title changes to avoid excessive saves
-  useEffect(() => {
-    if (debouncedTitle !== initialDocument.title && editor) {
-      saveDocument();
-    }
-  }, [debouncedTitle, saveDocument, initialDocument.title]);
-
-  // Cleanup timeout on component unmount
-  useEffect(() => {
-    return () => {
-      if (grammarCheckTimeoutRef.current) {
-        clearTimeout(grammarCheckTimeoutRef.current);
-      }
-    };
-  }, []);
-  
-  const acceptSuggestion = () => {
-    if (!editor || !currentSuggestion || isAcceptingSuggestion) return;
-    
-    console.log('🔧 Starting suggestion acceptance:', currentSuggestion);
-    
-    setIsAcceptingSuggestion(true);
-    const suggestionToAccept = currentSuggestion;
-    isApplyingSuggestionsRef.current = true;
-    
     const { state } = editor;
     const text = state.doc.textContent;
     
-    console.log('📄 Current document text:', text);
-
-    // Helper function to convert string position to TipTap document position
-    const convertStringPosToDocPos = (stringPos: number) => {
-      // TipTap positions are 1-indexed, string positions are 0-indexed.
-      return stringPos + 1;
-    };
-    
-    const occurrences = findOccurrences(text, suggestionToAccept.original);
-    
-    console.log('📍 Found occurrences:', occurrences);
+    const occurrences = findOccurrences(text, suggestion.original);
     
     if (occurrences.length === 0) {
-      console.warn('❌ Could not find original text in document:', suggestionToAccept.original);
-      setIsAcceptingSuggestion(false);
-      isApplyingSuggestionsRef.current = false;
+      console.warn('❌ Could not find original text in document:', suggestion.original);
       return;
     }
     
-    // Determine the target occurrence (closest to the cursor if multiple exist)
-    let targetOccurrence = occurrences[0];
-    if (occurrences.length > 1) {
-      const cursorPos = state.selection.from;
-      targetOccurrence = occurrences.reduce((prev, curr) => {
-        const prevDist = Math.abs(convertStringPosToDocPos(prev.start) - cursorPos);
-        const currDist = Math.abs(convertStringPosToDocPos(curr.start) - cursorPos);
-        return currDist < prevDist ? curr : prev;
-      });
-    }
-    
-    console.log('🎯 Target occurrence:', targetOccurrence);
-    
-    const tipTapStart = convertStringPosToDocPos(targetOccurrence.start);
-    const tipTapEnd = convertStringPosToDocPos(targetOccurrence.end);
-    
-    console.log('🔄 Position conversion:', {
-      stringStart: targetOccurrence.start,
-      stringEnd: targetOccurrence.end,
-      tipTapStart,
-      tipTapEnd,
-      docSize: state.doc.content.size
-    });
+    // Use the first occurrence
+    const targetOccurrence = occurrences[0];
+    const tipTapStart = targetOccurrence.start + 1;
+    const tipTapEnd = targetOccurrence.end + 1;
     
     try {
-      // Replace the text at the found position
+      // Replace the text
       const result = editor
         .chain()
         .focus()
         .setTextSelection({ from: tipTapStart, to: tipTapEnd })
         .deleteSelection()
-        .insertContent(suggestionToAccept.suggestion)
+        .insertContent(suggestion.suggestion)
         .run();
       
-      console.log('✅ Replacement command result:', result);
-      
-      // Clear all suggestion marks after a successful replacement
-      const { tr } = editor.state;
-      const docSize = editor.state.doc.content.size;
-      tr.removeMark(0, docSize, editor.schema.marks.suggestion);
-      editor.view.dispatch(tr);
-      console.log('🧹 Cleared all suggestion marks after replacement');
-    } catch (error) {
-      console.error('❌ Error during replacement:', error);
-    }
-    
-    // Reset flags, hide popup, and schedule a new grammar check
-    setTimeout(() => {
-      isApplyingSuggestionsRef.current = false;
-      setIsAcceptingSuggestion(false);
-      setShowSuggestionPopup(false);
-      setCurrentSuggestion(null);
-      
-      console.log('🔄 Scheduling new grammar check in 1 second...');
-      
-      // Trigger a new grammar check after accepting the suggestion
-      if (grammarCheckTimeoutRef.current) {
-        clearTimeout(grammarCheckTimeoutRef.current);
+      if (result) {
+        // Remove the applied suggestion from the list
+        setWritingSuggestions(prev => prev.filter(s => s.id !== suggestion.id));
+        
+        // Clear all suggestion marks and reapply remaining ones
+        setTimeout(() => {
+          const remainingSuggestions = writingSuggestions.filter(s => s.id !== suggestion.id);
+          if (remainingSuggestions.length === 0) {
+            clearSuggestionMarks(editor);
+          }
+        }, 100);
       }
-      grammarCheckTimeoutRef.current = setTimeout(() => {
-        console.log('🔍 Running new grammar check after suggestion acceptance');
-        checkGrammar(editor);
-      }, 1000);
-    }, 100);
+    } catch (error) {
+      console.error('❌ Error applying suggestion:', error);
+    }
   };
 
+  const applyAllSuggestionsOfType = (type: 'grammar' | 'academic_voice') => {
+    const suggestionsOfType = writingSuggestions.filter(s => s.type === type);
+    suggestionsOfType.forEach(suggestion => {
+      applySuggestion(suggestion);
+    });
+  };
+
+  const dismissSuggestion = (suggestionId: string) => {
+    setWritingSuggestions(prev => prev.filter(s => s.id !== suggestionId));
+    
+    // If no suggestions remain, clear visual marks
+    if (writingSuggestions.length === 1) {
+      if (editor) {
+        clearSuggestionMarks(editor);
+      }
+    }
+  };
+
+  const dismissAllSuggestionsOfType = (type: 'grammar' | 'academic_voice') => {
+    setWritingSuggestions(prev => prev.filter(s => s.type !== type));
+    
+    // Clear and reapply marks for remaining suggestions
+    if (editor) {
+      clearSuggestionMarks(editor);
+      const remainingSuggestions = writingSuggestions.filter(s => s.type !== type);
+      // Reapply marks for remaining suggestions...
+    }
+  };
+
+  // Thesis analysis functions
+  const analyzeThesis = async () => {
+    if (!selectedText.trim()) {
+      setError('Please select your thesis statement first.');
+      return;
+    }
+
+    setIsAnalyzingThesis(true);
+    setShowThesisAnalysis(true);
+
+    try {
+      const response = await supabase.functions.invoke('thesis-analyzer', {
+        body: { text: selectedText },
+      });
+
+      if (response.error) throw response.error;
+
+      setThesisAnalysisData(response.data);
+    } catch (error) {
+      console.error('Error analyzing thesis:', error);
+      setError('Failed to analyze thesis. Please try again.');
+    } finally {
+      setIsAnalyzingThesis(false);
+    }
+  };
+
+  const applyThesisAlternative = (text: string) => {
+    if (!editor || !selectedText.trim()) return;
+
+    const { from, to } = editor.state.selection;
+    
+    try {
+      editor
+        .chain()
+        .focus()
+        .setTextSelection({ from, to })
+        .deleteSelection()
+        .insertContent(text)
+        .run();
+      
+      // Keep the sidebar open to show remaining alternatives
+    } catch (error) {
+      console.error('Error applying thesis alternative:', error);
+    }
+  };
+
+  // Auto-save functionality
+  useEffect(() => {
+    const saveDocument = async () => {
+      if (!editor) return;
+
+      const content = editor.getJSON();
+      const contentString = JSON.stringify(content);
+
+      if (contentString === lastSavedContent) return;
+
+      setIsSaving(true);
+      try {
+        const { error } = await supabase
+          .from('documents')
+          .update({ content })
+          .eq('id', initialDocument.id);
+
+        if (error) throw error;
+
+        setLastSavedContent(contentString);
+        setError(null);
+      } catch (error) {
+        console.error('Error saving document:', error);
+        setError('Failed to save document');
+      } finally {
+        setIsSaving(false);
+      }
+    };
+
+    const debouncedSave = setTimeout(saveDocument, 1000);
+    return () => clearTimeout(debouncedSave);
+  }, [editor, supabase, initialDocument.id, lastSavedContent]);
+
+  // Auto-save title
+  useEffect(() => {
+    const saveTitle = async () => {
+      if (debouncedTitle === initialDocument.title) return;
+
+      try {
+        const { error } = await supabase
+          .from('documents')
+          .update({ title: debouncedTitle })
+          .eq('id', initialDocument.id);
+
+        if (error) throw error;
+        setError(null);
+      } catch (error) {
+        console.error('Error saving title:', error);
+        setError('Failed to save title');
+      }
+    };
+
+    if (debouncedTitle !== initialDocument.title) {
+      saveTitle();
+    }
+  }, [debouncedTitle, supabase, initialDocument.id, initialDocument.title]);
+
   if (!editor) {
-    return <div>Loading Editor...</div>;
+    return (
+      <div className="flex items-center justify-center h-96">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+      </div>
+    );
   }
 
   return (
-    <div className="flex flex-col w-full max-w-4xl gap-4 p-8 mx-auto">
-      <div className="flex items-center justify-between">
-        <input
-          type="text"
-          value={title}
-          onChange={e => setTitle(e.target.value)}
-          className="w-full text-4xl font-bold bg-transparent focus:outline-none"
-          placeholder="Untitled Document"
-        />
-        <div className="flex items-center gap-4 text-sm text-muted-foreground">
-          {isChecking && <div>Checking grammar...</div>}
-          {isSaving ? (
-            <div>Saving...</div>
-          ) : (
-            <div className="text-green-600">Saved</div>
-          )}
-          {error && <div className="text-destructive">{error}</div>}
+  <div className="flex h-screen bg-gradient-to-br from-slate-50 to-white">
+    <div className="flex-1 flex flex-col">
+      {/* Header */}
+      <div className="border-b border-gray-200 bg-white/80 backdrop-blur-sm p-4">
+        <div className="flex items-center justify-between">
+          <input
+            type="text"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            className="text-xl font-semibold bg-transparent border-none outline-none flex-1"
+            placeholder="Untitled Document"
+          />
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-gray-500">
+              {isSaving ? 'Saving...' : 'Saved'}
+            </span>
+            
+            {/* Manual Check Writing Button */}
+            <Button
+              onClick={checkWriting}
+              disabled={isChecking}
+              variant="outline"
+              size="sm"
+              className="flex items-center gap-2"
+            >
+              {isChecking ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                  Checking...
+                </>
+              ) : (
+                <>
+                  <FileText className="h-4 w-4" />
+                  Check Writing
+                </>
+              )}
+            </Button>
+
+            {/* Analyze Thesis Button */}
+            {selectedText.trim() && (
+              <Button 
+                onClick={analyzeThesis}
+                disabled={isAnalyzingThesis}
+                variant="outline"
+                size="sm"
+                className="flex items-center gap-2"
+              >
+                {isAnalyzingThesis ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                    Analyzing...
+                  </>
+                ) : (
+                  <>
+                    <Target className="h-4 w-4" />
+                    Analyze Thesis
+                  </>
+                )}
+              </Button>
+            )}
+          </div>
         </div>
+
+        {error && (
+          <div className="mt-2 text-sm text-red-600 bg-red-50 p-2 rounded">
+            {error}
+          </div>
+        )}
       </div>
 
-      {showSuggestionPopup && currentSuggestion && (
-        <div className="fixed bottom-4 right-4 p-4 bg-white border border-gray-200 rounded-lg shadow-lg flex flex-col gap-3 max-w-sm z-50">
-          <div className="flex justify-between items-start">
-            <h4 className="font-medium text-sm text-gray-900">Grammar Suggestion</h4>
-            <button
-              onClick={() => {
-                setShowSuggestionPopup(false);
-                setCurrentSuggestion(null);
-              }}
-              className="text-gray-400 hover:text-gray-600 text-sm"
-            >
-              ✕
-            </button>
-          </div>
-          <div className="text-sm text-gray-700">
-            <p className="mb-2">{currentSuggestion.explanation}</p>
-            <p className="mb-3">
-              <span className="font-medium">Original:</span> "{currentSuggestion.original}"
-            </p>
-          </div>
-                     <Button 
-             onClick={acceptSuggestion} 
-             size="sm" 
-             className="w-full" 
-             disabled={isAcceptingSuggestion}
-           >
-             {isAcceptingSuggestion ? "Accepting..." : `Accept: "${currentSuggestion.suggestion}"`}
-           </Button>
-        </div>
-      )}
-
-      <EditorContent editor={editor} className="prose dark:prose-invert max-w-none" />
+      {/* Editor */}
+      <div className="flex-1 p-6 overflow-auto">
+        <EditorContent editor={editor} className="prose dark:prose-invert max-w-none" />
+      </div>
     </div>
+    
+    {/* Writing Suggestions Sidebar */}
+    <WritingSuggestionsSidebar
+      suggestions={writingSuggestions}
+      isOpen={showWritingSuggestions}
+      isLoading={isChecking}
+      onClose={() => setShowWritingSuggestions(false)}
+      onApplySuggestion={applySuggestion}
+      onApplyAllOfType={applyAllSuggestionsOfType}
+      onDismissSuggestion={dismissSuggestion}
+      onDismissAllOfType={dismissAllSuggestionsOfType}
+    />
+    
+    {/* Thesis Analysis Sidebar */}
+    <ThesisAnalysisSidebar
+      data={thesisAnalysisData}
+      isOpen={showThesisAnalysis}
+      isLoading={isAnalyzingThesis}
+      onClose={() => {
+        setShowThesisAnalysis(false);
+        setThesisAnalysisData(null);
+      }}
+      onApplyAlternative={applyThesisAlternative}
+    />
+  </div>
   );
 } 
