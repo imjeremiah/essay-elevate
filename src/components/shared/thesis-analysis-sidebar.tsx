@@ -211,7 +211,7 @@ export function ThesisAnalysisSidebar({
                         </div>
                         <div className="p-3 bg-slate-50 rounded-md border border-slate-200">
                           <p className="text-sm text-slate-800 italic">
-                            "{alternative.text}"
+                            &ldquo;{alternative.text}&rdquo;
                           </p>
                         </div>
                         <p className="text-xs text-slate-600">
@@ -230,7 +230,7 @@ export function ThesisAnalysisSidebar({
             <div className="text-center py-12">
               <Target className="h-12 w-12 text-slate-400 mx-auto mb-4" />
               <p className="text-slate-600">
-                Select text and click "Analyze Thesis" to get started
+                Select text and click &ldquo;Analyze Thesis&rdquo; to get started
               </p>
             </div>
           )}

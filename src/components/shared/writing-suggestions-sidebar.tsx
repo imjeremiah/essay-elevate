@@ -6,7 +6,6 @@
 'use client';
 
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
 import { X, CheckCircle, AlertTriangle, Wand2, Check, SkipForward } from 'lucide-react';
 import { useState } from 'react';
 
@@ -58,10 +57,10 @@ function SuggestionItem({
       <div className="flex justify-between items-start gap-2 mb-2">
         <div className="flex-1">
           <div className="text-sm text-slate-600 mb-1">
-            <span className="font-medium">Change:</span> "{suggestion.original}"
+            <span className="font-medium">Change:</span> &ldquo;{suggestion.original}&rdquo;
           </div>
           <div className="text-sm font-medium text-slate-800 mb-2">
-            <span className="font-medium">To:</span> "{suggestion.suggestion}"
+            <span className="font-medium">To:</span> &ldquo;{suggestion.suggestion}&rdquo;
           </div>
           <p className="text-xs text-slate-600 leading-relaxed">
             {suggestion.explanation}
@@ -112,14 +111,12 @@ function SuggestionItem({
 function SectionHeader({
   title,
   count,
-  type,
   icon,
   onApplyAll,
   onDismissAll,
 }: {
   title: string;
   count: number;
-  type: 'grammar' | 'academic_voice';
   icon: React.ReactNode;
   onApplyAll: () => void;
   onDismissAll: () => void;
@@ -230,7 +227,6 @@ export function WritingSuggestionsSidebar({
               <SectionHeader
                 title="Grammar & Spelling"
                 count={grammarSuggestions.length}
-                type="grammar"
                 icon={<AlertTriangle className="h-4 w-4 text-red-600" />}
                 onApplyAll={() => onApplyAllOfType('grammar')}
                 onDismissAll={() => onDismissAllOfType('grammar')}
@@ -255,7 +251,6 @@ export function WritingSuggestionsSidebar({
               <SectionHeader
                 title="Formal Writing Style"
                 count={styleSuggestions.length}
-                type="academic_voice"
                 icon={<Wand2 className="h-4 w-4 text-amber-600" />}
                 onApplyAll={() => onApplyAllOfType('academic_voice')}
                 onDismissAll={() => onDismissAllOfType('academic_voice')}

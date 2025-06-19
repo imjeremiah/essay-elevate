@@ -9,9 +9,9 @@ import { Button } from '@/components/ui/button';
 import { useDebounce } from '@/lib/hooks/use-debounce';
 import { createClient } from '@/lib/supabase/client';
 import { type Document, type Suggestion as SuggestionType } from '@/lib/types';
-import { EditorContent, useEditor, BubbleMenu } from '@tiptap/react';
+import { EditorContent, useEditor } from '@tiptap/react';
 import { StarterKit } from '@tiptap/starter-kit';
-import { useCallback, useEffect, useState, useRef } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Suggestion } from '@/lib/editor/suggestion-extension';
 import { ThesisAnalysisSidebar } from '@/components/shared/thesis-analysis-sidebar';
 import { WritingSuggestionsSidebar } from '@/components/shared/writing-suggestions-sidebar';
@@ -98,6 +98,7 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
   
   // Thesis analysis state
   const [showThesisAnalysis, setShowThesisAnalysis] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [thesisAnalysisData, setThesisAnalysisData] = useState<any>(null);
   const [isAnalyzingThesis, setIsAnalyzingThesis] = useState(false);
   const [selectedText, setSelectedText] = useState('');
@@ -126,13 +127,14 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
   });
 
   // Clear suggestion marks helper
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const clearSuggestionMarks = (editorInstance: any) => {
     try {
       const { tr } = editorInstance.state;
       const docSize = editorInstance.state.doc.content.size;
       tr.removeMark(0, docSize, editorInstance.schema.marks.suggestion);
       editorInstance.view.dispatch(tr);
-    } catch (e) {
+    } catch {
       // Ignore errors when clearing suggestions
     }
   };
@@ -288,8 +290,7 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
         
         // Clear all suggestion marks and reapply remaining ones
         setTimeout(() => {
-          const remainingSuggestions = writingSuggestions.filter(s => s.id !== suggestion.id);
-          if (remainingSuggestions.length === 0) {
+          if (writingSuggestions.filter(s => s.id !== suggestion.id).length === 0) {
             clearSuggestionMarks(editor);
           }
         }, 100);
@@ -299,8 +300,8 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
     }
   };
 
-  const applyAllSuggestionsOfType = (type: 'grammar' | 'academic_voice') => {
-    const suggestionsOfType = writingSuggestions.filter(s => s.type === type);
+  const applyAllSuggestionsOfType = (suggestionType: 'grammar' | 'academic_voice') => {
+    const suggestionsOfType = writingSuggestions.filter(s => s.type === suggestionType);
     suggestionsOfType.forEach(suggestion => {
       applySuggestion(suggestion);
     });
@@ -317,14 +318,12 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
     }
   };
 
-  const dismissAllSuggestionsOfType = (type: 'grammar' | 'academic_voice') => {
-    setWritingSuggestions(prev => prev.filter(s => s.type !== type));
+  const dismissAllSuggestionsOfType = (suggestionType: 'grammar' | 'academic_voice') => {
+    setWritingSuggestions(prev => prev.filter(s => s.type !== suggestionType));
     
     // Clear and reapply marks for remaining suggestions
     if (editor) {
       clearSuggestionMarks(editor);
-      const remainingSuggestions = writingSuggestions.filter(s => s.type !== type);
-      // Reapply marks for remaining suggestions...
     }
   };
 
