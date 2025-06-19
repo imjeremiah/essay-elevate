@@ -237,7 +237,7 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
         const acadOccurrences = findOccurrences(text, acadSuggestion.original);
         if (acadOccurrences.length > 0) {
           const acadRange = acadOccurrences[0];
-          const hasOverlap = grammarSuggestions.some(grammarSuggestion => {
+          const hasOverlap = grammarSuggestions.some((grammarSuggestion: Omit<WritingSuggestion, 'id'>) => {
             const grammarOccurrences = findOccurrences(text, grammarSuggestion.original);
             if (grammarOccurrences.length > 0) {
               const grammarRange = grammarOccurrences[0];
