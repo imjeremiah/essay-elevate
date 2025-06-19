@@ -53,22 +53,37 @@ function escapeRegExp(str: string): string {
  */
 function findOccurrences(text: string, target: string): Array<{ start: number; end: number }> {
   const occurrences: Array<{ start: number; end: number }> = [];
-  const escapedTarget = escapeRegExp(target);
   
-  // Use word boundaries for single words to avoid partial matches
-  const isSingleWord = !target.includes(' ') && target.length > 2;
-  const pattern = isSingleWord ? `\\b${escapedTarget}\\b` : escapedTarget;
-  const regex = new RegExp(pattern, 'gi');
-  
-  let match;
-  while ((match = regex.exec(text)) !== null) {
+  // First try exact string matching (case-insensitive)
+  let searchIndex = 0;
+  while (searchIndex < text.length) {
+    const index = text.toLowerCase().indexOf(target.toLowerCase(), searchIndex);
+    if (index === -1) break;
+    
     occurrences.push({
-      start: match.index,
-      end: match.index + match[0].length,
+      start: index,
+      end: index + target.length,
     });
-    // Prevent infinite loop for zero-length matches
-    if (match.index === regex.lastIndex) {
-      regex.lastIndex++;
+    searchIndex = index + 1;
+  }
+  
+  // If no exact matches, try regex with word boundaries for single words
+  if (occurrences.length === 0) {
+    const escapedTarget = escapeRegExp(target);
+    const isSingleWord = !target.includes(' ') && target.length > 2;
+    const pattern = isSingleWord ? `\\b${escapedTarget}\\b` : escapedTarget;
+    const regex = new RegExp(pattern, 'gi');
+    
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+      occurrences.push({
+        start: match.index,
+        end: match.index + match[0].length,
+      });
+      // Prevent infinite loop for zero-length matches
+      if (match.index === regex.lastIndex) {
+        regex.lastIndex++;
+      }
     }
   }
   
@@ -154,7 +169,8 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
     if (!editor) return;
     const { tr } = editor.state;
     const docSize = editor.state.doc.content.size;
-    const docText = editor.state.doc.textContent;
+    // Use the same text retrieval method as checkWriting for consistency
+    const docText = editor.getText();
     
     // Clear existing suggestion marks before applying new ones
     tr.removeMark(0, docSize, editor.schema.marks.suggestion);
@@ -200,6 +216,11 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
     if (!editor) return;
 
     const text = editor.getText();
+    console.log('🔍 Checking writing with text:', {
+      length: text.length,
+      preview: text.slice(0, 100) + '...'
+    });
+    
     if (!text.trim()) {
       clearSuggestionMarks(editor);
       setWritingSuggestions([]);
@@ -308,13 +329,18 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
   const applySuggestion = async (suggestion: WritingSuggestion) => {
     if (!editor) return;
 
-    const { state } = editor;
-    const text = state.doc.textContent;
+    // Use the same text retrieval method as checkWriting for consistency
+    const text = editor.getText();
     
     const occurrences = findOccurrences(text, suggestion.original);
     
     if (occurrences.length === 0) {
-      console.warn('❌ Could not find original text in document:', suggestion.original);
+      console.warn('❌ Could not find original text in document:', {
+        original: suggestion.original,
+        textLength: text.length,
+        textPreview: text.slice(0, 100) + '...',
+        suggestionType: suggestion.type
+      });
       return;
     }
     
