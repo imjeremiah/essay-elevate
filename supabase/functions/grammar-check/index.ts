@@ -25,7 +25,7 @@ Deno.serve(async req => {
       throw new Error('OPENAI_API_KEY is not set in environment variables.');
     }
 
-    const { text } = await req.json();
+    const { text, includeAcademicVoice } = await req.json();
 
     if (!text) {
       return new Response(JSON.stringify({ error: 'No text provided.' }), {
@@ -34,7 +34,81 @@ Deno.serve(async req => {
       });
     }
 
-    // Call the OpenAI API to get grammar and spelling suggestions.
+    // Performance optimization: Combined API call when includeAcademicVoice is true
+    if (includeAcademicVoice) {
+      console.log('🚀 Making combined grammar + academic voice API call');
+      
+      // Combined system prompt for both grammar and academic voice
+      const combinedSystemPrompt = `You are an expert writing assistant. Your task is to analyze the user's text and provide BOTH grammar corrections AND academic voice improvements.
+
+TASK 1 - GRAMMAR CORRECTIONS:
+Identify and correct ONLY clear, objective grammatical errors. Your suggested correction must be a "drop-in" replacement that makes grammatical sense in context.
+
+CRITICAL RULES:
+1. Identify the Full Phrase: Always expand your selection to include all parts of the incorrect grammatical phrase.
+2. Be Conservative: When in doubt, DO NOT suggest a change. Only flag clear, unambiguous errors.
+3. Do Not Flag Punctuation: Never flag correct punctuation like periods or standard commas.
+4. Handle Homophones: Correctly identify and fix misuse of homophones.
+
+TASK 2 - ACADEMIC VOICE IMPROVEMENTS:
+Identify and correct informal or casual language to elevate it to a more sophisticated, academic tone.
+
+RULES:
+1. Focus on phrases or sentences that are informal, conversational, or not suitable for formal academic writing.
+2. Provide clear, precise alternatives that maintain the original meaning.
+3. Avoid overly complex or archaic language - aim for sophistication, not obfuscation.
+4. Do not correct grammar in this section (that's handled above).
+
+JSON OUTPUT FORMAT:
+Return ONLY a valid JSON object with this structure:
+{
+  "grammarSuggestions": [
+    {
+      "original": "incorrect phrase",
+      "suggestion": "corrected phrase",
+      "explanation": "Brief explanation of the grammar rule"
+    }
+  ],
+  "academicVoiceSuggestions": [
+    {
+      "original": "informal phrase",
+      "suggestion": "academic alternative",
+      "explanation": "Brief explanation of the improvement"
+    }
+  ]
+}
+
+If no errors are found in either category, return empty arrays.`;
+
+      const combinedCompletion = await openAI.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: combinedSystemPrompt },
+          { role: 'user', content: text },
+        ],
+        response_format: { type: 'json_object' },
+      });
+
+      const combinedResponseContent = combinedCompletion.choices[0].message.content;
+      if (!combinedResponseContent) {
+        throw new Error('No content in combined OpenAI response.');
+      }
+
+      try {
+        const combinedResult = JSON.parse(combinedResponseContent);
+        
+        return new Response(JSON.stringify(combinedResult), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 200,
+        });
+      } catch (parseError) {
+        console.error('Error parsing combined OpenAI JSON response:', parseError);
+        throw new Error('Could not parse combined response from AI.');
+      }
+    }
+
+    // Fallback to original grammar-only API call
+    console.log('📝 Making grammar-only API call');
     const completion = await openAI.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [

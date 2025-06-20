@@ -6,6 +6,7 @@
 'use client';
 
 import { Button } from '@/components/ui/button';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { useDebounce } from '@/lib/hooks/use-debounce';
 import { createClient } from '@/lib/supabase/client';
 import { type Document } from '@/lib/types';
@@ -16,7 +17,11 @@ import { Suggestion, SuggestionCategory } from '@/lib/editor/suggestion-extensio
 import { useSuggestionEngine } from '@/lib/hooks/use-suggestion-engine';
 import { ThesisSidebar } from '@/components/feature/ThesisSidebar';
 import { ArgumentSidebar } from '@/components/feature/ArgumentSidebar';
-import { Lightbulb, MessageSquare, Zap, Target, AlertTriangle, ArrowRight, Brain, Loader2 } from 'lucide-react';
+import { CriticalThinkingMargin } from '@/components/feature/CriticalThinkingPrompt';
+import { useCriticalThinking } from '@/lib/hooks/use-critical-thinking';
+import { PerformanceDebugger } from '@/components/debug/PerformanceDebugger';
+import { exportDocument, type ExportFormat } from '@/lib/export-utils';
+import { Lightbulb, MessageSquare, Zap, Target, AlertTriangle, ArrowRight, Brain, Loader2, Download, FileText, Globe, Printer } from 'lucide-react';
 import { DocumentAnalysis } from '@/lib/hooks/use-suggestion-engine';
 import './editor-styles.css';
 
@@ -107,6 +112,16 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
     paragraphContext?: string;
   }>>([]);
   const [documentAnalysis, setDocumentAnalysis] = useState<DocumentAnalysis | null>(null);
+  
+  // Performance debugger state (development only)
+  const [showDebugger, setShowDebugger] = useState(false);
+
+  // Critical thinking state
+  const [criticalThinkingPrompts, setCriticalThinkingPrompts] = useState<any[]>([]);
+
+  const dismissCriticalPrompt = useCallback((promptId: string) => {
+    setCriticalThinkingPrompts(prev => prev.filter(p => p.id !== promptId));
+  }, []);
 
   const { isChecking, error: engineError, checkText, checkEvidence, analyzeArgument } = useSuggestionEngine();
 
@@ -256,15 +271,18 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
         clearTimeout(evidenceCheckTimeoutRef.current);
       }
 
-      // Schedule real-time suggestion checks (grammar + academic voice)
+      // Schedule real-time suggestion checks (grammar + academic voice) - optimized timing
       suggestionCheckTimeoutRef.current = setTimeout(() => {
         runSuggestionCheck(editorInstance);
-      }, 2000);
+      }, 4000); // Increased from 2s to 4s for better performance
 
-      // Schedule evidence checks (quote dropping detection)
+      // Schedule evidence checks (quote dropping detection) - optimized timing
       evidenceCheckTimeoutRef.current = setTimeout(() => {
         runEvidenceCheck(editorInstance);
-      }, 3000); // Slightly delayed to avoid overlapping with main suggestions
+      }, 6000); // Increased from 3s to 6s, staggered to avoid API overload
+
+      // Trigger critical thinking analysis
+      analyzeCriticalThinking();
     },
     onCreate: ({ editor: editorInstance }) => {
       setTimeout(() => {
@@ -278,23 +296,35 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
     if (!editorInstance) return;
 
     const text = editorInstance.getText();
-    if (!text.trim()) {
-      try {
-        const { tr } = editorInstance.state;
-        const docSize = editorInstance.state.doc.content.size;
-        tr.removeMark(0, docSize, editorInstance.schema.marks.suggestion);
-        editorInstance.view.dispatch(tr);
-      } catch (error) { 
-        console.error('Error clearing suggestions:', error);
+    
+    // Enhanced content validation with performance optimizations
+    if (!text.trim() || text.length < 50) {
+      console.log('⏭️ Skipping suggestion check: content too short or empty');
+      
+      // Clear existing suggestions for empty/short content
+      if (!text.trim()) {
+        try {
+          const { tr } = editorInstance.state;
+          const docSize = editorInstance.state.doc.content.size;
+          tr.removeMark(0, docSize, editorInstance.schema.marks.suggestion);
+          editorInstance.view.dispatch(tr);
+        } catch (error) { 
+          console.error('Error clearing suggestions:', error);
+        }
       }
       return;
     }
 
-    // Get real-time suggestions (grammar + academic voice)
+    console.log('🔍 Running optimized suggestion check...');
+    
+    // Get real-time suggestions (now with caching and optimizations)
     const allSuggestions = await checkText(text);
 
     if (allSuggestions.length > 0) {
+      console.log(`✅ Found ${allSuggestions.length} suggestions`);
       applySuggestionsToEditor(editorInstance, allSuggestions);
+    } else {
+      console.log('✅ No new suggestions found');
     }
   }, [checkText, applySuggestionsToEditor]);
 
@@ -302,17 +332,27 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
     if (!editorInstance) return;
 
     const text = editorInstance.getText();
-    if (!text.trim()) return;
+    
+    // Enhanced content validation - skip if too short or no quotes likely
+    if (!text.trim() || text.length < 100 || !text.includes('"')) {
+      console.log('⏭️ Skipping evidence check: content too short or no quotes detected');
+      return;
+    }
 
-    // Get evidence suggestions (quote dropping detection)
+    console.log('🔍 Running optimized evidence check...');
+
+    // Get evidence suggestions (quote dropping detection with caching)
     const evidenceSuggestions = await checkEvidence(text);
 
     if (evidenceSuggestions.length > 0) {
+      console.log(`✅ Found ${evidenceSuggestions.length} evidence suggestions`);
       applySuggestionsToEditor(editorInstance, evidenceSuggestions, false);
+    } else {
+      console.log('✅ No evidence issues found');
     }
   }, [checkEvidence, applySuggestionsToEditor]);
 
-  // Place handleArgumentSuggestionClick after editor is declared
+  // Define all hooks before the early return
   const handleArgumentSuggestionClick = useCallback((suggestion: typeof argumentSuggestions[0]) => {
     if (!editor) return;
     
@@ -381,32 +421,42 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
     setIsSaving(false);
   }, [editor, supabase, debouncedTitle, initialDocument.id, initialDocument.title, lastSavedContent]);
 
-  const debouncedEditorState = useDebounce(editor?.state.doc.toJSON(), 1000);
-
-  useEffect(() => {
-    if (debouncedEditorState && editor) {
-      saveDocument();
+  const handleThesisSidebarOpen = useCallback(() => {
+    if (editor) {
+      const { from, to } = editor.state.selection;
+      const text = editor.state.doc.textBetween(from, to);
+      setSelectedTextForThesis(text);
+      setThesisSidebarOpen(true);
     }
-  }, [debouncedEditorState, saveDocument, editor]);
-
-  useEffect(() => {
-    if (debouncedTitle !== initialDocument.title && editor) {
-      saveDocument();
-    }
-  }, [debouncedTitle, saveDocument, initialDocument.title, editor]);
-
-  useEffect(() => {
-    return () => {
-      if (suggestionCheckTimeoutRef.current) {
-        clearTimeout(suggestionCheckTimeoutRef.current);
-      }
-      if (evidenceCheckTimeoutRef.current) {
-        clearTimeout(evidenceCheckTimeoutRef.current);
-      }
-    };
-  }, []);
+  }, [editor]);
   
-  const acceptSuggestion = () => {
+  const handleThesisSidebarClose = useCallback(() => {
+    setThesisSidebarOpen(false);
+    setSelectedTextForThesis('');
+  }, []);
+
+  const handleReplaceThesis = useCallback((newThesis: string) => {
+    if (editor) {
+      const { from, to } = editor.state.selection;
+      editor.chain().focus().deleteRange({ from, to }).insertContent(newThesis).run();
+      handleThesisSidebarClose();
+    }
+  }, [editor, handleThesisSidebarClose]);
+
+  const handleArgumentSidebarClose = useCallback(() => {
+    setArgumentSidebarOpen(false);
+    setArgumentSuggestions([]);
+    setDocumentAnalysis(null);
+  }, []);
+
+  const handleExport = useCallback((format: ExportFormat) => {
+    if (!editor) return;
+    
+    const content = editor.getJSON();
+    exportDocument(format, title || 'Untitled Document', content);
+  }, [editor, title]);
+
+  const acceptSuggestion = useCallback(() => {
     if (!editor || !currentSuggestion || isAcceptingSuggestion) return;
     
     setIsAcceptingSuggestion(true);
@@ -470,10 +520,49 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
       }
       suggestionCheckTimeoutRef.current = setTimeout(() => {
         runSuggestionCheck(editor);
-      }, 1000);
+      }, 2000); // Reduced re-check delay after accepting suggestion
     }, 100);
-  };
+  }, [editor, currentSuggestion, isAcceptingSuggestion, runSuggestionCheck]);
 
+  // Add critical thinking analysis function
+  const analyzeCriticalThinking = useCallback(() => {
+    // Simple implementation - could be enhanced with actual AI analysis
+    if (!editor) return;
+    
+    const text = editor.getText();
+    if (text.length < 100) return; // Don't analyze very short content
+    
+    // For now, just clear existing prompts to avoid build-up
+    // In a full implementation, this would call an AI service
+    setCriticalThinkingPrompts([]);
+  }, [editor]);
+
+  const debouncedEditorState = useDebounce(editor?.state.doc.toJSON(), 1000);
+
+  useEffect(() => {
+    if (debouncedEditorState && editor) {
+      saveDocument();
+    }
+  }, [debouncedEditorState, saveDocument, editor]);
+
+  useEffect(() => {
+    if (debouncedTitle !== initialDocument.title && editor) {
+      saveDocument();
+    }
+  }, [debouncedTitle, saveDocument, initialDocument.title, editor]);
+
+  useEffect(() => {
+    return () => {
+      if (suggestionCheckTimeoutRef.current) {
+        clearTimeout(suggestionCheckTimeoutRef.current);
+      }
+      if (evidenceCheckTimeoutRef.current) {
+        clearTimeout(evidenceCheckTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // Early return AFTER all hooks are defined
   if (!editor) {
     return <div>Loading Editor...</div>;
   }
@@ -498,34 +587,6 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
     fallacy: <AlertTriangle className="h-4 w-4" />,
     consistency: <Zap className="h-4 w-4" />,
     logical_flow: <ArrowRight className="h-4 w-4" />,
-  };
-
-  const handleThesisSidebarOpen = () => {
-    if (editor) {
-      const { from, to } = editor.state.selection;
-      const text = editor.state.doc.textBetween(from, to);
-      setSelectedTextForThesis(text);
-      setThesisSidebarOpen(true);
-    }
-  };
-  
-  const handleThesisSidebarClose = () => {
-    setThesisSidebarOpen(false);
-    setSelectedTextForThesis('');
-  };
-
-  const handleReplaceThesis = (newThesis: string) => {
-    if (editor) {
-      const { from, to } = editor.state.selection;
-      editor.chain().focus().deleteRange({ from, to }).insertContent(newThesis).run();
-      handleThesisSidebarClose();
-    }
-  };
-
-  const handleArgumentSidebarClose = () => {
-    setArgumentSidebarOpen(false);
-    setArgumentSuggestions([]);
-    setDocumentAnalysis(null);
   };
 
   return (
@@ -556,6 +617,30 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
             placeholder="Untitled Document"
           />
           <div className="flex items-center gap-4 text-sm text-muted-foreground">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm">
+                  <Download className="h-4 w-4 mr-2" />
+                  Export
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuLabel>Export Document</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => handleExport('txt')}>
+                  <FileText className="h-4 w-4 mr-2" />
+                  Text (.txt)
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleExport('html')}>
+                  <Globe className="h-4 w-4 mr-2" />
+                  HTML (.html)
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleExport('pdf')}>
+                  <Printer className="h-4 w-4 mr-2" />
+                  PDF (.pdf)
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             {isChecking && <div>Checking...</div>}
             {isSaving ? (
               <div>Saving...</div>
@@ -624,7 +709,7 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
         )}
 
         {showSuggestionPopup && currentSuggestion && (
-          <div className="fixed bottom-4 right-4 p-4 bg-white border border-gray-200 rounded-lg shadow-lg flex flex-col gap-3 max-w-sm z-50">
+          <div className="fixed bottom-4 right-4 p-4 bg-white/95 backdrop-blur-sm border border-gray-200 rounded-lg shadow-lg flex flex-col gap-3 max-w-sm z-50 suggestion-popup fade-in">
             <div className="flex justify-between items-start">
               <div className="flex items-center gap-2">
                 {suggestionCategoryIcons[currentSuggestion.category]}
@@ -685,8 +770,23 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
           </div>
         )}
 
-        <EditorContent editor={editor} className="prose dark:prose-invert max-w-none" />
-      </div>
-    </>
-  );
-} 
+        <div className="relative editor-container">
+          <EditorContent editor={editor} className="prose dark:prose-invert max-w-none fade-in" />
+          <CriticalThinkingMargin 
+            prompts={criticalThinkingPrompts}
+            onDismiss={dismissCriticalPrompt}
+            editorElement={editor?.view.dom || null}
+          />
+        </div>
+              </div>
+        
+        {/* Performance Debugger (Development Only) */}
+        {process.env.NODE_ENV === 'development' && (
+          <PerformanceDebugger 
+            isVisible={showDebugger}
+            onToggle={() => setShowDebugger(!showDebugger)}
+          />
+        )}
+      </>
+    );
+  } 
