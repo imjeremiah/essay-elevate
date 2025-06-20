@@ -20,7 +20,7 @@ interface PerformanceMetric {
  * @param immediate - Whether to trigger on the leading edge
  * @returns The debounced function
  */
-export function debounce<T extends (...args: any[]) => any>(
+export function debounce<T extends (...args: unknown[]) => unknown>(
   func: T,
   wait: number,
   immediate = false
@@ -50,7 +50,7 @@ export function debounce<T extends (...args: any[]) => any>(
  * @param wait - The number of milliseconds to throttle invocations to
  * @returns The throttled function
  */
-export function throttle<T extends (...args: any[]) => any>(
+export function throttle<T extends (...args: unknown[]) => unknown>(
   func: T,
   wait: number
 ): (...args: Parameters<T>) => void {
@@ -60,14 +60,14 @@ export function throttle<T extends (...args: any[]) => any>(
   
   return function(...args: Parameters<T>) {
     if (!inThrottle) {
-      func.apply(this, args);
+      func(...args);
       lastRan = Date.now();
       inThrottle = true;
     } else {
       clearTimeout(lastFunc);
       lastFunc = setTimeout(() => {
         if (Date.now() - lastRan >= wait) {
-          func.apply(this, args);
+          func(...args);
           lastRan = Date.now();
         }
       }, Math.max(wait - (Date.now() - lastRan), 0));
@@ -92,7 +92,7 @@ export async function measurePerformance<T>(
   try {
     const result = await operation();
     return result;
-  } catch (e) {
+  } catch (e: unknown) {
     success = false;
     error = e instanceof Error ? e.message : 'Unknown error';
     throw e;
@@ -130,7 +130,7 @@ export function measureSyncPerformance<T>(
   try {
     const result = operation();
     return result;
-  } catch (e) {
+  } catch (e: unknown) {
     success = false;
     error = e instanceof Error ? e.message : 'Unknown error';
     throw e;
@@ -227,9 +227,9 @@ export class LRUCache<K, V> {
  * Optimizes AI API calls by implementing intelligent batching and caching.
  */
 export class AIRequestOptimizer {
-  private cache = createLRUCache<string, any>(100);
-  private pendingRequests = new Map<string, Promise<any>>();
-  private requestQueue: Array<{ key: string; request: () => Promise<any>; resolve: (value: any) => void; reject: (error: any) => void }> = [];
+  private cache = new LRUCache<string, unknown>(100);
+  private pendingRequests = new Map<string, Promise<unknown>>();
+  private requestQueue: Array<{ key: string; request: () => Promise<unknown>; resolve: (value: unknown) => void; reject: (error: unknown) => void }> = [];
   private isProcessing = false;
   
   /**
@@ -254,9 +254,9 @@ export class AIRequestOptimizer {
     const requestPromise = new Promise<T>((resolve, reject) => {
       this.requestQueue.push({
         key,
-        request: request as () => Promise<any>,
-        resolve,
-        reject
+        request: request as () => Promise<unknown>,
+        resolve: resolve as (value: unknown) => void,
+        reject: reject as (error: unknown) => void
       });
       
       this.processQueue();

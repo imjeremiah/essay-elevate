@@ -1,18 +1,18 @@
 /**
- * @file Debug component for monitoring performance and testing Phase 5 features.
- * This component provides insights into application performance and feature functionality.
+ * @file Performance debugging component for development.
+ * Shows real-time performance metrics and AI feature status.
  */
 'use client';
 
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card } from '@/components/ui/card';
 import { performanceMonitor } from '@/lib/performance-utils';
-import { Activity, Bug, Download, Lightbulb, Zap, X } from 'lucide-react';
+import { X, Activity } from 'lucide-react';
 
 interface PerformanceDebuggerProps {
-  isVisible?: boolean;
-  onToggle?: () => void;
+  isVisible: boolean;
+  onToggle: () => void;
 }
 
 interface PerformanceStats {
@@ -22,12 +22,11 @@ interface PerformanceStats {
 }
 
 /**
- * Debug component for monitoring application performance and testing features.
- * Only shown in development mode or when explicitly enabled.
+ * Development-only component for monitoring application performance.
+ * Shows AI request times, success rates, and other metrics.
  */
-export function PerformanceDebugger({ isVisible = false, onToggle }: PerformanceDebuggerProps) {
+export function PerformanceDebugger({ isVisible, onToggle }: PerformanceDebuggerProps) {
   const [stats, setStats] = useState<Record<string, PerformanceStats>>({});
-  const [isExpanded, setIsExpanded] = useState(false);
   const [refreshInterval, setRefreshInterval] = useState<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
@@ -55,24 +54,6 @@ export function PerformanceDebugger({ isVisible = false, onToggle }: Performance
       }
     }
   }, [isVisible, refreshInterval]);
-
-  const testFeatures = {
-    'Critical Thinking Prompter': () => {
-      console.log('Testing Critical Thinking Prompter...');
-      // This would trigger a test of the critical thinking feature
-    },
-    'Document Export': () => {
-      console.log('Testing Document Export...');
-      // This would trigger a test export
-    },
-    'Performance Monitoring': () => {
-      performanceMonitor.logStats();
-    },
-    'Clear Performance Cache': () => {
-      // Clear all performance data
-      console.log('Performance cache cleared');
-    }
-  };
 
   if (!isVisible) {
     return (

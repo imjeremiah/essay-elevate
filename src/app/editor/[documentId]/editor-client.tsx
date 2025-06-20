@@ -17,6 +17,7 @@ import { Suggestion, SuggestionCategory } from '@/lib/editor/suggestion-extensio
 import { useSuggestionEngine } from '@/lib/hooks/use-suggestion-engine';
 import { ThesisSidebar } from '@/components/feature/ThesisSidebar';
 import { CriticalThinkingMargin } from '@/components/feature/CriticalThinkingPrompt';
+import { type PromptPosition } from '@/lib/hooks/use-critical-thinking';
 import { PerformanceDebugger } from '@/components/debug/PerformanceDebugger';
 import { exportDocument, type ExportFormat } from '@/lib/export-utils';
 import { Lightbulb, MessageSquare, Zap, Target, Brain, Loader2, Download, FileText, Printer, ArrowLeft } from 'lucide-react';
@@ -128,13 +129,24 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
   const [showDebugger, setShowDebugger] = useState(false);
 
   // Critical thinking state
-  const [criticalThinkingPrompts, setCriticalThinkingPrompts] = useState<Array<{ id: string; position: number; paragraph: string; prompt: { type: string; question: string; explanation: string } }>>([]);
+  const [criticalThinkingPrompts, setCriticalThinkingPrompts] = useState<PromptPosition[]>([]);
 
   // Track whether suggestions have been processed (accepted/dismissed)
   const [hasProcessedSuggestions, setHasProcessedSuggestions] = useState(false);
 
   const dismissCriticalPrompt = useCallback((promptId: string) => {
     setCriticalThinkingPrompts(prev => prev.filter(p => p.id !== promptId));
+  }, []);
+
+  // Helper function for simple hashing
+  const createSimpleHash = useCallback((text: string): string => {
+    let hash = 0;
+    for (let i = 0; i < text.length; i++) {
+      const char = text.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash;
+    }
+    return hash.toString();
   }, []);
 
   const { isChecking, error: engineError, checkText, checkEvidence, analyzeArgument, checkAcademicVoice } = useSuggestionEngine();
@@ -444,17 +456,6 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
     }
   }, [checkText, applySuggestionsToEditor, createSimpleHash]);
 
-  // Helper function for simple hashing
-  const createSimpleHash = useCallback((text: string): string => {
-    let hash = 0;
-    for (let i = 0; i < text.length; i++) {
-      const char = text.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash = hash & hash;
-    }
-    return hash.toString();
-  }, []);
-
   // Define all hooks before the early return
   const handleArgumentSuggestionClick = useCallback((suggestion: typeof argumentSuggestions[0]) => {
     if (!editor) return;
@@ -671,13 +672,17 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
                   <DropdownMenuContent align="end">
                     <DropdownMenuLabel>Export Document</DropdownMenuLabel>
                     <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => handleExport('txt')}>
+                      <FileText className="h-4 w-4 mr-2" />
+                      Text (.txt)
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleExport('html')}>
+                      <FileText className="h-4 w-4 mr-2" />
+                      HTML (.html)
+                    </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => handleExport('pdf')}>
                       <Printer className="h-4 w-4 mr-2" />
                       PDF (.pdf)
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => handleExport('docx')}>
-                      <FileText className="h-4 w-4 mr-2" />
-                      Word (.docx)
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -741,7 +746,7 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
                   return (
                     <div className="text-center py-6 mb-6 bg-green-50 rounded-lg border border-green-200">
                       <div className="text-4xl mb-3">✅</div>
-                      <h3 className="text-lg font-semibold text-gray-900 mb-1">You're on point!</h3>
+                      <h3 className="text-lg font-semibold text-gray-900 mb-1">You&apos;re on point!</h3>
                       <p className="text-gray-600 text-sm">All suggestions have been reviewed.</p>
                     </div>
                   );
