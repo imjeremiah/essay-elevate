@@ -6,12 +6,24 @@ import {
   createDocument,
 } from '@/app/dashboard/actions';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { createClient } from '@/lib/supabase/server';
-import { Plus, FileText, Calendar, Clock, MoreHorizontal } from 'lucide-react';
+import { Plus, FileText, Calendar, Clock } from 'lucide-react';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { DocumentActions } from './document-actions';
+
+/**
+ * Document interface for type safety
+ */
+interface Document {
+  id: string;
+  title: string;
+  created_at: string;
+  content: Record<string, unknown> | null;
+  preview_text?: string | null;
+  word_count?: number;
+  status?: string;
+}
 
 /**
  * Helper function to format dates in a user-friendly way
@@ -36,15 +48,15 @@ function formatDate(dateString: string) {
 /**
  * Helper function to group documents by date
  */
-function groupDocumentsByDate(documents: any[]) {
+function groupDocumentsByDate(documents: Document[]) {
   const today = new Date();
   const yesterday = new Date(today);
   yesterday.setDate(yesterday.getDate() - 1);
   
   const groups = {
-    today: [] as any[],
-    yesterday: [] as any[],
-    earlier: [] as any[]
+    today: [] as Document[],
+    yesterday: [] as Document[],
+    earlier: [] as Document[]
   };
 
   documents.forEach(doc => {
@@ -66,7 +78,7 @@ function groupDocumentsByDate(documents: any[]) {
 /**
  * Document card component with rich preview
  */
-function DocumentCard({ document }: { document: any }) {
+function DocumentCard({ document }: { document: Document }) {
   return (
     <div className="group bg-white border border-gray-200 rounded-lg p-6 hover:shadow-md transition-all duration-200 hover:border-gray-300">
       <div className="flex items-start justify-between mb-3">
@@ -122,7 +134,7 @@ function DocumentCard({ document }: { document: any }) {
 /**
  * Document group section
  */
-function DocumentGroup({ title, documents }: { title: string; documents: any[] }) {
+function DocumentGroup({ title, documents }: { title: string; documents: Document[] }) {
   if (documents.length === 0) return null;
 
   return (
@@ -170,14 +182,14 @@ export default async function DashboardPage() {
         // If content is a JSON object (from TipTap editor), extract text
         if (typeof doc.content === 'object' && doc.content.content) {
           // Extract text from TipTap JSON structure
-          const extractText = (nodes: any[]): string => {
+          const extractText = (nodes: Record<string, unknown>[]): string => {
             return nodes.map(node => {
-              if (node.type === 'text') return node.text || '';
-              if (node.content) return extractText(node.content);
+              if (node.type === 'text') return (node.text as string) || '';
+              if (node.content) return extractText(node.content as Record<string, unknown>[]);
               return '';
             }).join(' ');
           };
-          textContent = extractText(doc.content.content || []);
+          textContent = extractText((doc.content.content as Record<string, unknown>[]) || []);
         } else if (typeof doc.content === 'string') {
           textContent = doc.content;
         }

@@ -7,7 +7,7 @@
 
 import { createClient } from '@/lib/supabase/client';
 import { useCallback, useState, useRef } from 'react';
-import { measurePerformance, performanceMonitor } from '@/lib/performance-utils';
+import { measurePerformance } from '@/lib/performance-utils';
 
 // Expanded to include Phase 4 suggestion types
 export type SuggestionCategory = 'grammar' | 'academic_voice' | 'evidence' | 'argument' | 'logical_flow' | 'consistency' | 'claim_support' | 'fallacy';
@@ -62,19 +62,7 @@ function createContentHash(text: string): string {
   return Math.abs(hash).toString();
 }
 
-/**
- * Splits text into meaningful chunks (sentences/paragraphs) for incremental analysis.
- * @param text The text to split
- * @returns Array of text chunks
- */
-function splitIntoChunks(text: string): string[] {
-  // Split by sentences and paragraphs, keeping meaningful chunks
-  const chunks = text.split(/(?<=[.!?])\s+|\n\n+/)
-    .map(chunk => chunk.trim())
-    .filter(chunk => chunk.length > 20); // Skip very short chunks
-  
-  return chunks.length > 0 ? chunks : [text];
-}
+
 
 /**
  * A hook to manage fetching writing suggestions from various Supabase Edge Functions.
@@ -106,7 +94,7 @@ export function useSuggestionEngine() {
       return cached.suggestions;
     }
     return null;
-  }, []);
+  }, [CACHE_DURATION]);
 
   /**
    * Stores suggestions in cache with automatic cleanup.

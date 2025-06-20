@@ -108,10 +108,10 @@ export function CriticalThinkingPrompt({ prompt, onDismiss }: CriticalThinkingPr
 
           {/* Question */}
           <div className="space-y-2">
-            <p className="text-sm font-medium text-foreground">
+            <h4 className="text-sm font-medium text-foreground">
               {prompt.prompt.question}
-            </p>
-            <p className="text-xs text-muted-foreground">
+            </h4>
+            <p className="text-xs text-gray-600 mt-1">
               {prompt.prompt.explanation}
             </p>
           </div>
@@ -122,9 +122,9 @@ export function CriticalThinkingPrompt({ prompt, onDismiss }: CriticalThinkingPr
               Related to this paragraph:
             </p>
             <p className="text-xs italic text-muted-foreground bg-muted/50 p-2 rounded border max-h-20 overflow-y-auto">
-              "{prompt.paragraph.length > 100 
+              &quot;{prompt.paragraph.length > 100 
                 ? `${prompt.paragraph.substring(0, 100)}...` 
-                : prompt.paragraph}"
+                : prompt.paragraph}&quot;
             </p>
           </div>
         </div>

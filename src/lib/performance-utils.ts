@@ -1,7 +1,15 @@
 /**
- * @file Performance utilities for monitoring and optimizing the application.
- * Includes debouncing, throttling, and performance monitoring functions.
+ * @file Performance monitoring and optimization utilities for EssayElevate.
+ * Provides tools for measuring AI request performance, caching, and debugging.
  */
+
+interface PerformanceMetric {
+  operation: string;
+  duration: number;
+  timestamp: number;
+  success: boolean;
+  error?: string;
+}
 
 /**
  * Creates a debounced version of a function that delays invoking until after
@@ -68,84 +76,151 @@ export function throttle<T extends (...args: any[]) => any>(
 }
 
 /**
- * Measures the performance of a function and logs the result.
- * 
- * @param name - The name of the operation being measured
- * @param func - The function to measure
- * @returns The result of the function
+ * Measures the execution time of an async operation and returns both result and timing.
+ * @param operationName - Name of the operation being measured
+ * @param operation - The async operation to measure
+ * @returns Promise containing the result and performance metrics
  */
 export async function measurePerformance<T>(
-  name: string,
-  func: () => Promise<T> | T
+  operationName: string,
+  operation: () => Promise<T>
 ): Promise<T> {
   const startTime = performance.now();
-  
+  let success = true;
+  let error: string | undefined;
+
   try {
-    const result = await func();
-    const endTime = performance.now();
-    const duration = endTime - startTime;
-    
-    console.log(`Performance: ${name} took ${duration.toFixed(2)}ms`);
-    
-    // Log warning for slow operations
-    if (duration > 1000) {
-      console.warn(`Slow operation detected: ${name} took ${duration.toFixed(2)}ms`);
-    }
-    
+    const result = await operation();
     return result;
-  } catch (error) {
-    const endTime = performance.now();
-    const duration = endTime - startTime;
-    console.error(`Performance: ${name} failed after ${duration.toFixed(2)}ms`, error);
-    throw error;
+  } catch (e) {
+    success = false;
+    error = e instanceof Error ? e.message : 'Unknown error';
+    throw e;
+  } finally {
+    const duration = performance.now() - startTime;
+    
+    // Log performance metric
+    console.log(`⏱️  ${operationName}: ${duration.toFixed(2)}ms ${success ? '✅' : '❌'}`);
+    
+    // Store metric for potential analysis
+    performanceMonitor.addMetric({
+      operation: operationName,
+      duration,
+      timestamp: Date.now(),
+      success,
+      error
+    });
   }
 }
 
 /**
- * Creates a cache with LRU (Least Recently Used) eviction policy.
- * 
- * @param maxSize - Maximum number of items to store in cache
- * @returns Cache object with get, set, has, and clear methods
+ * Measures the execution time of a sync operation and returns both result and timing.
+ * @param operationName - Name of the operation being measured
+ * @param operation - The sync operation to measure
+ * @returns The result with side-effect performance logging
  */
-export function createLRUCache<K, V>(maxSize: number) {
-  const cache = new Map<K, V>();
-  
-  return {
-    get(key: K): V | undefined {
-      if (cache.has(key)) {
-        // Move to end (mark as recently used)
-        const value = cache.get(key)!;
-        cache.delete(key);
-        cache.set(key, value);
-        return value;
-      }
-      return undefined;
-    },
+export function measureSyncPerformance<T>(
+  operationName: string,
+  operation: () => T
+): T {
+  const startTime = performance.now();
+  let success = true;
+  let error: string | undefined;
+
+  try {
+    const result = operation();
+    return result;
+  } catch (e) {
+    success = false;
+    error = e instanceof Error ? e.message : 'Unknown error';
+    throw e;
+  } finally {
+    const duration = performance.now() - startTime;
     
-    set(key: K, value: V): void {
-      if (cache.has(key)) {
-        // Update existing key
-        cache.delete(key);
-      } else if (cache.size >= maxSize) {
-        // Remove least recently used (first item)
-        const firstKey = cache.keys().next().value;
-        cache.delete(firstKey);
-      }
-      cache.set(key, value);
-    },
+    // Log performance metric
+    console.log(`⏱️  ${operationName}: ${duration.toFixed(2)}ms ${success ? '✅' : '❌'}`);
     
-    has(key: K): boolean {
-      return cache.has(key);
-    },
-    
-    clear(): void {
-      cache.clear();
-    },
-    
-    get size(): number {
-      return cache.size;
+    // Store metric for potential analysis
+    performanceMonitor.addMetric({
+      operation: operationName,
+      duration,
+      timestamp: Date.now(),
+      success,
+      error
+    });
+  }
+}
+
+/**
+ * Simple LRU (Least Recently Used) cache implementation for performance optimization.
+ */
+export class LRUCache<K, V> {
+  private maxSize: number;
+  private cache: Map<K, V>;
+
+  constructor(maxSize: number = 50) {
+    this.maxSize = maxSize;
+    this.cache = new Map();
+  }
+
+  /**
+   * Gets a value from the cache. Moves the key to the front.
+   * @param key - The cache key
+   * @returns The cached value or undefined
+   */
+  get(key: K): V | undefined {
+    const value = this.cache.get(key);
+    if (value !== undefined) {
+      // Move to front (most recently used)
+      this.cache.delete(key);
+      this.cache.set(key, value);
     }
-  };
+    return value;
+  }
+
+  /**
+   * Sets a value in the cache. Evicts oldest if at capacity.
+   * @param key - The cache key
+   * @param value - The value to cache
+   */
+  set(key: K, value: V): void {
+    if (this.cache.has(key)) {
+      // Update existing key - move to front
+      this.cache.delete(key);
+    } else if (this.cache.size >= this.maxSize) {
+      // Evict least recently used (first item)
+      const firstKey = this.cache.keys().next().value;
+      if (firstKey !== undefined) {
+        this.cache.delete(firstKey);
+      }
+    }
+    
+    this.cache.set(key, value);
+  }
+
+  /**
+   * Checks if a key exists in the cache.
+   * @param key - The cache key
+   * @returns Whether the key exists
+   */
+  has(key: K): boolean {
+    return this.cache.has(key);
+  }
+
+  /**
+   * Clears all entries from the cache.
+   */
+  clear(): void {
+    this.cache.clear();
+  }
+
+  /**
+   * Gets the current size of the cache.
+   * @returns The number of cached entries
+   */
+  size(): number {
+    return this.cache.size;
+  }
 }
 
 /**
@@ -235,72 +310,95 @@ export class AIRequestOptimizer {
 export const aiOptimizer = new AIRequestOptimizer();
 
 /**
- * Monitors application performance and logs metrics.
+ * Performance monitoring singleton to track application performance.
  */
-export class PerformanceMonitor {
-  private metrics: { [key: string]: number[] } = {};
-  
+class PerformanceMonitor {
+  private metrics: PerformanceMetric[] = [];
+  private maxMetrics = 100; // Keep last 100 metrics
+
   /**
-   * Records a performance metric.
-   * 
-   * @param name - Name of the metric
-   * @param value - Value to record
+   * Adds a performance metric to the monitor.
+   * @param metric - The performance metric to add
    */
-  record(name: string, value: number): void {
-    if (!this.metrics[name]) {
-      this.metrics[name] = [];
-    }
+  addMetric(metric: PerformanceMetric): void {
+    this.metrics.push(metric);
     
-    this.metrics[name].push(value);
-    
-    // Keep only last 100 measurements
-    if (this.metrics[name].length > 100) {
-      this.metrics[name] = this.metrics[name].slice(-100);
+    // Keep only the most recent metrics
+    if (this.metrics.length > this.maxMetrics) {
+      this.metrics = this.metrics.slice(-this.maxMetrics);
     }
   }
-  
+
   /**
-   * Gets statistics for a metric.
-   * 
-   * @param name - Name of the metric
-   * @returns Statistics object with min, max, avg, and count
+   * Gets all performance metrics.
+   * @returns Array of performance metrics
    */
-  getStats(name: string): { min: number; max: number; avg: number; count: number } | null {
-    const values = this.metrics[name];
-    if (!values || values.length === 0) {
-      return null;
-    }
-    
-    const min = Math.min(...values);
-    const max = Math.max(...values);
-    const avg = values.reduce((sum, val) => sum + val, 0) / values.length;
-    
-    return { min, max, avg, count: values.length };
+  getMetrics(): PerformanceMetric[] {
+    return [...this.metrics];
   }
-  
+
   /**
-   * Logs all performance statistics to console.
+   * Gets metrics for a specific operation.
+   * @param operationName - Name of the operation
+   * @returns Array of metrics for the operation
    */
-  logStats(): void {
-    console.group('Performance Statistics');
+  getMetricsForOperation(operationName: string): PerformanceMetric[] {
+    return this.metrics.filter(m => m.operation === operationName);
+  }
+
+  /**
+   * Gets average execution time for an operation.
+   * @param operationName - Name of the operation
+   * @returns Average duration in milliseconds
+   */
+  getAverageTime(operationName: string): number {
+    const operationMetrics = this.getMetricsForOperation(operationName);
+    if (operationMetrics.length === 0) return 0;
     
-    Object.keys(this.metrics).forEach(name => {
-      const stats = this.getStats(name);
-      if (stats) {
-        console.log(`${name}:`, {
-          avg: `${stats.avg.toFixed(2)}ms`,
-          min: `${stats.min.toFixed(2)}ms`,
-          max: `${stats.max.toFixed(2)}ms`,
-          samples: stats.count
-        });
-      }
+    const totalTime = operationMetrics.reduce((sum, m) => sum + m.duration, 0);
+    return totalTime / operationMetrics.length;
+  }
+
+  /**
+   * Gets success rate for an operation.
+   * @param operationName - Name of the operation
+   * @returns Success rate as a percentage (0-100)
+   */
+  getSuccessRate(operationName: string): number {
+    const operationMetrics = this.getMetricsForOperation(operationName);
+    if (operationMetrics.length === 0) return 100;
+    
+    const successCount = operationMetrics.filter(m => m.success).length;
+    return (successCount / operationMetrics.length) * 100;
+  }
+
+  /**
+   * Clears all performance metrics.
+   */
+  clear(): void {
+    this.metrics = [];
+  }
+
+  /**
+   * Gets a summary of performance statistics.
+   * @returns Performance summary object
+   */
+  getSummary(): Record<string, { avgTime: number; successRate: number; count: number }> {
+    const operations = [...new Set(this.metrics.map(m => m.operation))];
+    const summary: Record<string, { avgTime: number; successRate: number; count: number }> = {};
+    
+    operations.forEach(op => {
+      const metrics = this.getMetricsForOperation(op);
+      summary[op] = {
+        avgTime: this.getAverageTime(op),
+        successRate: this.getSuccessRate(op),
+        count: metrics.length
+      };
     });
     
-    console.groupEnd();
+    return summary;
   }
 }
 
-/**
- * Global performance monitor instance.
- */
+// Export singleton instance
 export const performanceMonitor = new PerformanceMonitor(); 

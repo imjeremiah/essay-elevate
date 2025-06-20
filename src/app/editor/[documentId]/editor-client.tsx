@@ -19,7 +19,7 @@ import { ThesisSidebar } from '@/components/feature/ThesisSidebar';
 import { CriticalThinkingMargin } from '@/components/feature/CriticalThinkingPrompt';
 import { PerformanceDebugger } from '@/components/debug/PerformanceDebugger';
 import { exportDocument, type ExportFormat } from '@/lib/export-utils';
-import { Lightbulb, MessageSquare, Zap, Target, Brain, Loader2, Download, FileText, Globe, Printer, ArrowLeft } from 'lucide-react';
+import { Lightbulb, MessageSquare, Zap, Target, Brain, Loader2, Download, FileText, Printer, ArrowLeft } from 'lucide-react';
 import { DocumentAnalysis } from '@/lib/hooks/use-suggestion-engine';
 import Link from 'next/link';
 import './editor-styles.css';
@@ -442,7 +442,7 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
     } catch (error) {
       console.error('Grammar check error:', error);
     }
-  }, [checkText, applySuggestionsToEditor]);
+  }, [checkText, applySuggestionsToEditor, createSimpleHash]);
 
   // Helper function for simple hashing
   const createSimpleHash = useCallback((text: string): string => {
@@ -839,7 +839,6 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
                                       // Clear the suggestion mark from editor
                                       setTimeout(() => {
                                         const { tr } = editor.state;
-                                        const newText = editor.state.doc.textContent;
                                         
                                         // Remove all marks for this original text
                                         editor.state.doc.descendants((node, pos) => {
