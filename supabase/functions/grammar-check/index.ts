@@ -25,13 +25,87 @@ Deno.serve(async req => {
       throw new Error('OPENAI_API_KEY is not set in environment variables.');
     }
 
-    const { text, includeAcademicVoice } = await req.json();
+    const { text, includeAcademicVoice, mode, maxSuggestions } = await req.json();
 
     if (!text) {
       return new Response(JSON.stringify({ error: 'No text provided.' }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
+    }
+
+    // **FAST MODE OPTIMIZATION** for real-time grammar checking
+    if (mode === 'fast') {
+      console.log(`⚡ Fast grammar check mode (${text.length} chars)`);
+      
+      const fastCompletion = await openAI.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: `You are a systematic grammar correction assistant. Follow this EXACT process:
+
+STEP 1: SCAN FOR CAPITALIZATION (Check every single word)
+- Find the first word → Must be capitalized
+- Find every pattern ". [lowercase]" → Change to ". [Uppercase]" 
+- Find every pattern "! [lowercase]" → Change to "! [Uppercase]"
+- Find every pattern "? [lowercase]" → Change to "? [Uppercase]"
+- Find proper nouns (names, places) → Must be capitalized
+
+STEP 2: SCAN FOR OTHER ERRORS
+- Spelling mistakes (cathces→catches, thee→the)
+- Subject-verb agreement (he have→he has)
+- Wrong verb tenses (I have went→I went)
+- Articles (a apple→an apple)
+- Homophones (to/too, their/there)
+
+PROCESS INSTRUCTIONS:
+1. Work through the text character by character
+2. When you see ". " or "! " or "? " → the next word MUST start with capital
+3. Mark EVERY violation you find
+4. Don't skip any - be mechanical and thorough
+
+Return exactly what you find. No interpretation, just systematic correction.
+
+JSON FORMAT:
+{ "suggestions": [{ "original": "error", "suggestion": "fix", "explanation": "rule violated" }] }`,
+          },
+          {
+            role: 'user',
+            content: text.trim(),
+          },
+        ],
+        response_format: { type: 'json_object' },
+        max_tokens: 500, // Limit response size for speed
+        temperature: 0.1, // Low temperature for consistency and speed
+      });
+
+      const fastResponseContent = fastCompletion.choices[0].message.content;
+      if (!fastResponseContent) {
+        return new Response(JSON.stringify({ suggestions: [] }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 200,
+        });
+      }
+
+      try {
+        const fastResult = JSON.parse(fastResponseContent);
+        // Ensure we don't exceed maxSuggestions
+        if (fastResult.suggestions && maxSuggestions) {
+          fastResult.suggestions = fastResult.suggestions.slice(0, maxSuggestions);
+        }
+        
+        return new Response(JSON.stringify(fastResult), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 200,
+        });
+      } catch (parseError) {
+        console.error('Error parsing fast mode JSON response:', parseError);
+        return new Response(JSON.stringify({ suggestions: [] }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 200,
+        });
+      }
     }
 
     // Performance optimization: Combined API call when includeAcademicVoice is true
@@ -51,12 +125,12 @@ CRITICAL RULES:
 4. Handle Homophones: Correctly identify and fix misuse of homophones.
 
 TASK 2 - ACADEMIC VOICE IMPROVEMENTS:
-Identify and correct informal or casual language to elevate it to a more sophisticated, academic tone.
+Identify and correct informal or casual language to help 9th grade students develop a clear, confident writing voice suitable for high school essays.
 
 RULES:
-1. Focus on phrases or sentences that are informal, conversational, or not suitable for formal academic writing.
-2. Provide clear, precise alternatives that maintain the original meaning.
-3. Avoid overly complex or archaic language - aim for sophistication, not obfuscation.
+1. Focus on phrases or sentences that are too casual, informal, or not suitable for a high school essay.
+2. Use vocabulary appropriate for 9th grade reading level (Flesch-Kincaid 9-10). Choose clear, direct words over complex synonyms.
+3. Focus on eliminating casual language while keeping vocabulary accessible. The goal is clarity and strength, not complexity.
 4. Do not correct grammar in this section (that's handled above).
 
 JSON OUTPUT FORMAT:
@@ -66,14 +140,14 @@ Return ONLY a valid JSON object with this structure:
     {
       "original": "incorrect phrase",
       "suggestion": "corrected phrase",
-      "explanation": "Brief explanation of the grammar rule"
+      "explanation": "Brief, student-friendly explanation of the grammar rule"
     }
   ],
   "academicVoiceSuggestions": [
     {
       "original": "informal phrase",
       "suggestion": "academic alternative",
-      "explanation": "Brief explanation of the improvement"
+      "explanation": "Brief, encouraging explanation of the improvement using simple language"
     }
   ]
 }
@@ -114,38 +188,32 @@ If no errors are found in either category, return empty arrays.`;
       messages: [
         {
           role: 'system',
-          content: `You are an expert grammar correction assistant. Your task is to identify and correct ONLY clear, objective grammatical errors in the user's text. You must be extremely precise and return a structured JSON object.
+          content: `You are a systematic grammar correction assistant. Follow this EXACT process:
 
-Your core responsibility is to ensure that your suggested correction is a "drop-in" replacement that makes grammatical sense in the context of the sentence. This means you must identify the ENTIRE incorrect phrase.
+STEP 1: SCAN FOR CAPITALIZATION (Check every single word)
+- Find the first word → Must be capitalized
+- Find every pattern ". [lowercase]" → Change to ". [Uppercase]" 
+- Find every pattern "! [lowercase]" → Change to "! [Uppercase]"
+- Find every pattern "? [lowercase]" → Change to "? [Uppercase]"
+- Find proper nouns (names, places) → Must be capitalized
 
-For example, if the user writes "I have gone to the store yesterday," the simple past tense is required.
-- BAD: Correcting only "gone" to "went" would result in "I have went...", which is still incorrect.
-- GOOD: You must identify "have gone" as the incorrect phrase and suggest replacing it with "went". The final sentence should be "I went to the store yesterday."
+STEP 2: SCAN FOR OTHER ERRORS
+- Spelling mistakes (cathces→catches, thee→the)
+- Subject-verb agreement (he have→he has)
+- Wrong verb tenses (I have went→I went)
+- Articles (a apple→an apple)
+- Homophones (to/too, their/there)
 
-CRITICAL RULES:
-1.  **Identify the Full Phrase:** Always expand your selection to include all parts of the incorrect grammatical phrase (e.g., auxiliary verbs like "have").
-2.  **Be Conservative:** When in doubt, DO NOT suggest a change. Only flag clear, unambiguous errors.
-3.  **Do Not Flag Punctuation:** Never flag correct punctuation like periods or standard commas. A period at the end of a sentence is always correct.
-4.  **Handle Homophones:** Correctly identify and fix misuse of homophones (e.g., "to" vs. "too", "their" vs. "there").
+PROCESS INSTRUCTIONS:
+1. Work through the text character by character
+2. When you see ". " or "! " or "? " → the next word MUST start with capital
+3. Mark EVERY violation you find
+4. Don't skip any - be mechanical and thorough
 
-JSON-ONLY OUTPUT:
-Return ONLY a valid JSON object with a single key, "suggestions", which is an array of suggestion objects.
-Each suggestion object must have these keys: { "original": string, "suggestion": string, "explanation": string }.
-If there are no errors, return { "suggestions": [] }.
+Return exactly what you find. No interpretation, just systematic correction.
 
-Example of a good suggestion:
-User text: "He have went to the park."
-Your JSON output:
-{
-  "suggestions": [
-    {
-      "original": "have went",
-      "suggestion": "has gone",
-      "explanation": "The correct present perfect form is 'has gone'."
-    }
-  ]
-}
-`,
+JSON FORMAT:
+{ "suggestions": [{ "original": "error", "suggestion": "fix", "explanation": "rule violated" }] }`,
         },
         {
           role: 'user',

@@ -57,9 +57,9 @@ const categoryConfig = {
   logical_flow: {
     title: 'Logical Flow',
     icon: <ArrowRight className="h-4 w-4" />,
-    color: 'text-blue-600',
-    bgColor: 'bg-blue-50',
-    borderColor: 'border-blue-200'
+    color: 'text-red-600',
+    bgColor: 'bg-red-50',
+    borderColor: 'border-red-200'
   },
   argument: {
     title: 'General Argument',

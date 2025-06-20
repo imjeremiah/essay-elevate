@@ -15,13 +15,13 @@
   box-shadow: 0 1px 3px rgba(220, 38, 38, 0.3);
 }
 
-/* Grammar suggestions - blue underline */
+/* Grammar suggestions - red underline */
 .suggestion-grammar {
-  @apply bg-blue-200/50 border-b-2 border-blue-500;
+  @apply bg-red-200/50 border-b-2 border-red-500;
 }
 
 .suggestion-grammar:hover {
-  @apply bg-blue-300/70;
+  @apply bg-red-300/70;
 }
 
 /* Academic voice suggestions - amber underline */
@@ -33,13 +33,13 @@
   @apply bg-amber-300/70;
 }
 
-/* Evidence suggestions - green underline for quote-dropping issues */
+/* Evidence suggestions - blue underline for quote-dropping issues */
 .suggestion-evidence {
-  @apply bg-green-200/50 border-b-2 border-green-500;
+  @apply bg-blue-200/50 border-b-2 border-blue-500;
 }
 
 .suggestion-evidence:hover {
-  @apply bg-green-300/70;
+  @apply bg-blue-300/70;
 }
 
 /* Argument suggestions - purple underline for logical issues */
@@ -78,13 +78,13 @@
   @apply bg-yellow-300/70;
 }
 
-/* Logical Flow suggestions - blue underline */
+/* Logical Flow suggestions - red underline */
 .suggestion-logical_flow {
-  @apply bg-blue-200/50 border-b-2 border-blue-500;
+  @apply bg-red-200/50 border-b-2 border-red-500;
 }
 
 .suggestion-logical_flow:hover {
-  @apply bg-blue-300/70;
+  @apply bg-red-300/70;
 }
 
 /* Enhanced ProseMirror editor styling */

@@ -1,6 +1,6 @@
 /**
- * @file This file contains a client component for handling actions
- * related to a single document, such as renaming or deleting it.
+ * @file Enhanced document actions component with Grammarly-style functionality
+ * including duplicate, export, and better visual organization.
  */
 'use client';
 
@@ -34,10 +34,10 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { MoreHorizontal } from 'lucide-react';
+import { MoreHorizontal, Edit, Copy, Trash2, ExternalLink } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
-import { deleteDocument, renameDocument } from './actions';
+import { deleteDocument, renameDocument, duplicateDocument } from './actions';
 
 interface DocumentActionsProps {
   documentId: string;
@@ -130,40 +130,76 @@ function DeleteDocumentDialog({
 }
 
 /**
- * Renders a dropdown menu with actions for a document, including deleting and renaming it.
+ * Renders an enhanced dropdown menu with Grammarly-style actions for a document.
  *
  * @param {DocumentActionsProps} props - The component props.
  * @returns The rendered document actions component.
  */
 export function DocumentActions({ documentId }: DocumentActionsProps) {
+  const [isDuplicating, setIsDuplicating] = useState(false);
+
+  const handleDuplicate = async () => {
+    setIsDuplicating(true);
+    try {
+      const result = await duplicateDocument(documentId);
+      if (result.error) {
+        alert(result.error); // In a real app, you'd use a toast or better error handling
+      }
+    } catch (error) {
+      console.error('Error duplicating document:', error);
+      alert('Failed to duplicate document');
+    } finally {
+      setIsDuplicating(false);
+    }
+  };
+
+
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" className="h-8 w-8 p-0">
+        <Button variant="ghost" size="sm" className="h-8 w-8 p-0 opacity-60 hover:opacity-100 transition-opacity">
           <span className="sr-only">Open menu</span>
           <MoreHorizontal className="h-4 w-4" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
+      <DropdownMenuContent align="end" className="w-48">
         <DropdownMenuItem asChild>
           <Link
             href={`/editor/${documentId}`}
-            className="w-full cursor-pointer"
+            className="w-full cursor-pointer flex items-center"
           >
+            <ExternalLink className="w-4 h-4 mr-2" />
             Open
           </Link>
         </DropdownMenuItem>
+        
+        <DropdownMenuSeparator />
+        
         <RenameDocumentDialog documentId={documentId}>
-          <DropdownMenuItem onSelect={e => e.preventDefault()}>
+          <DropdownMenuItem onSelect={e => e.preventDefault()} className="flex items-center">
+            <Edit className="w-4 h-4 mr-2" />
             Rename
           </DropdownMenuItem>
         </RenameDocumentDialog>
+        
+        <DropdownMenuItem 
+          onSelect={handleDuplicate}
+          className="flex items-center"
+          disabled={isDuplicating}
+        >
+          <Copy className="w-4 h-4 mr-2" />
+          {isDuplicating ? 'Duplicating...' : 'Duplicate'}
+        </DropdownMenuItem>
+        
         <DropdownMenuSeparator />
+        
         <DeleteDocumentDialog documentId={documentId}>
           <DropdownMenuItem
-            className="text-destructive"
+            className="text-destructive flex items-center focus:text-destructive"
             onSelect={e => e.preventDefault()}
           >
+            <Trash2 className="w-4 h-4 mr-2" />
             Delete
           </DropdownMenuItem>
         </DeleteDocumentDialog>

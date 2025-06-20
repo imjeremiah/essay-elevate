@@ -124,3 +124,53 @@ export async function renameDocument(
   revalidatePath('/dashboard');
   return { error: null };
 }
+
+/**
+ * Duplicates a document by its ID.
+ * Creates a copy of the document with "(Copy)" appended to the title.
+ * @param documentId The ID of the document to duplicate.
+ */
+export async function duplicateDocument(documentId: string): Promise<{ error: string | null; newDocumentId?: string }> {
+  const supabase = createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: 'You must be logged in to duplicate a document.' };
+  }
+
+  // First, fetch the original document
+  const { data: originalDoc, error: fetchError } = await supabase
+    .from('documents')
+    .select('title, content')
+    .eq('id', documentId)
+    .eq('user_id', user.id)
+    .single();
+
+  if (fetchError || !originalDoc) {
+    console.error('Error fetching document for duplication:', fetchError);
+    return { error: 'Could not find document to duplicate.' };
+  }
+
+  // Create the duplicate with "(Copy)" appended to the title
+  const newTitle = `${originalDoc.title} (Copy)`;
+  const { data: newDoc, error: createError } = await supabase
+    .from('documents')
+    .insert({
+      user_id: user.id,
+      title: newTitle,
+      content: originalDoc.content,
+    })
+    .select('id')
+    .single();
+
+  if (createError || !newDoc) {
+    console.error('Error creating duplicate document:', createError);
+    return { error: 'Could not create duplicate document.' };
+  }
+
+  revalidatePath('/dashboard');
+  return { error: null, newDocumentId: newDoc.id };
+}

@@ -33,14 +33,14 @@ const categoryIcons = {
 };
 
 const categoryColors = {
-  grammar: 'bg-blue-100 border-blue-300 text-blue-700',
+  grammar: 'bg-red-100 border-red-300 text-red-700',
   academic_voice: 'bg-amber-100 border-amber-300 text-amber-700',
-  evidence: 'bg-green-100 border-green-300 text-green-700',
+  evidence: 'bg-blue-100 border-blue-300 text-blue-700',
   argument: 'bg-purple-100 border-purple-300 text-purple-700',
   claim_support: 'bg-orange-100 border-orange-300 text-orange-700',
-  fallacy: 'bg-red-100 border-red-300 text-red-700',
+  fallacy: 'bg-purple-100 border-purple-300 text-purple-700',
   consistency: 'bg-yellow-100 border-yellow-300 text-yellow-700',
-  logical_flow: 'bg-blue-100 border-blue-300 text-blue-700',
+  logical_flow: 'bg-red-100 border-red-300 text-red-700',
 };
 
 /**

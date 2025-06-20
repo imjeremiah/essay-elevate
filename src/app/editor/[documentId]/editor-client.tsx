@@ -16,13 +16,12 @@ import { useCallback, useEffect, useState, useRef } from 'react';
 import { Suggestion, SuggestionCategory } from '@/lib/editor/suggestion-extension';
 import { useSuggestionEngine } from '@/lib/hooks/use-suggestion-engine';
 import { ThesisSidebar } from '@/components/feature/ThesisSidebar';
-import { ArgumentSidebar } from '@/components/feature/ArgumentSidebar';
 import { CriticalThinkingMargin } from '@/components/feature/CriticalThinkingPrompt';
-import { useCriticalThinking } from '@/lib/hooks/use-critical-thinking';
 import { PerformanceDebugger } from '@/components/debug/PerformanceDebugger';
 import { exportDocument, type ExportFormat } from '@/lib/export-utils';
-import { Lightbulb, MessageSquare, Zap, Target, AlertTriangle, ArrowRight, Brain, Loader2, Download, FileText, Globe, Printer } from 'lucide-react';
+import { Lightbulb, MessageSquare, Zap, Target, Brain, Loader2, Download, FileText, Globe, Printer, ArrowLeft } from 'lucide-react';
 import { DocumentAnalysis } from '@/lib/hooks/use-suggestion-engine';
+import Link from 'next/link';
 import './editor-styles.css';
 
 /**
@@ -67,13 +66,6 @@ interface EditorClientProps {
   initialDocument: Document;
 }
 
-interface ActiveSuggestion {
-  suggestion: string; // Can be empty for coaching suggestions (evidence/argument)
-  explanation: string;
-  original: string;
-  category: SuggestionCategory;
-}
-
 /**
  * The main client component for the text editor.
  * @param {EditorClientProps} props - The properties for the component.
@@ -85,23 +77,26 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
   const debouncedTitle = useDebounce(title, 500);
 
   const suggestionCheckTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const evidenceCheckTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isApplyingSuggestionsRef = useRef(false);
+  const lastAnalyzedContentRef = useRef<string>('');
+  const lastCursorPositionRef = useRef<number>(0);
 
   const [isSaving, setIsSaving] = useState(false);
   const [lastSavedContent, setLastSavedContent] = useState<string>(
     JSON.stringify(initialDocument.content || '')
   );
-  const [showSuggestionPopup, setShowSuggestionPopup] = useState(false);
-  const [currentSuggestion, setCurrentSuggestion] = useState<ActiveSuggestion | null>(null);
-  const [isAcceptingSuggestion, setIsAcceptingSuggestion] = useState(false);
+  const [currentSuggestions, setCurrentSuggestions] = useState<Array<{
+    suggestion: string;
+    explanation: string;
+    original: string;
+    category: SuggestionCategory;
+  }>>([]);
 
   // State for Thesis Analyzer
   const [isThesisSidebarOpen, setThesisSidebarOpen] = useState(false);
   const [selectedTextForThesis, setSelectedTextForThesis] = useState('');
 
   // State for Argument Analysis
-  const [isArgumentSidebarOpen, setArgumentSidebarOpen] = useState(false);
   const [isAnalyzingArgument, setIsAnalyzingArgument] = useState(false);
   const [argumentSuggestions, setArgumentSuggestions] = useState<Array<{
     suggestion: string;
@@ -111,19 +106,38 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
     severity?: 'high' | 'medium' | 'low';
     paragraphContext?: string;
   }>>([]);
-  const [documentAnalysis, setDocumentAnalysis] = useState<DocumentAnalysis | null>(null);
+  const [, setDocumentAnalysis] = useState<DocumentAnalysis | null>(null);
+
+  // State for on-demand Clarity and Evidence Analysis
+  const [isAnalyzingClarity, setIsAnalyzingClarity] = useState(false);
+  const [isAnalyzingEvidence, setIsAnalyzingEvidence] = useState(false);
+  const [claritySuggestions, setClaritySuggestions] = useState<Array<{
+    suggestion: string;
+    explanation: string;
+    original: string;
+    category: SuggestionCategory;
+  }>>([]);
+  const [evidenceSuggestions, setEvidenceSuggestions] = useState<Array<{
+    suggestion: string;
+    explanation: string;
+    original: string;
+    category: SuggestionCategory;
+  }>>([]);
   
   // Performance debugger state (development only)
   const [showDebugger, setShowDebugger] = useState(false);
 
   // Critical thinking state
-  const [criticalThinkingPrompts, setCriticalThinkingPrompts] = useState<any[]>([]);
+  const [criticalThinkingPrompts, setCriticalThinkingPrompts] = useState<Array<{ id: string; position: number; paragraph: string; prompt: { type: string; question: string; explanation: string } }>>([]);
+
+  // Track whether suggestions have been processed (accepted/dismissed)
+  const [hasProcessedSuggestions, setHasProcessedSuggestions] = useState(false);
 
   const dismissCriticalPrompt = useCallback((promptId: string) => {
     setCriticalThinkingPrompts(prev => prev.filter(p => p.id !== promptId));
   }, []);
 
-  const { isChecking, error: engineError, checkText, checkEvidence, analyzeArgument } = useSuggestionEngine();
+  const { isChecking, error: engineError, checkText, checkEvidence, analyzeArgument, checkAcademicVoice } = useSuggestionEngine();
 
   const applySuggestionsToEditor = useCallback((editorInstance: ReturnType<typeof useEditor>, suggestions: Array<{
     suggestion: string;
@@ -138,6 +152,8 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
     const { tr } = editorInstance.state;
     const docSize = editorInstance.state.doc.content.size;
     const docText = editorInstance.state.doc.textContent;
+    
+    console.log(`🎯 Applying ${suggestions.length} suggestions to editor (clearFirst: ${clearFirst})`);
     
     // Collect existing evidence and argument suggestions before clearing
     const existingEvidenceAndArgument: Array<{
@@ -172,13 +188,14 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
       
       // Clear all suggestion marks
       tr.removeMark(0, docSize, editorInstance.schema.marks.suggestion);
+      console.log(`🧹 Cleared all suggestion marks from editor`);
     }
     
     // Apply new suggestions
+    let appliedCount = 0;
     suggestions.forEach((s) => {
-      // Evidence and argument suggestions have empty suggestion fields but are still valid
-      const isCoachingSuggestion = s.category === 'evidence' || s.category === 'argument';
-      const hasRequiredFields = s.original && s.explanation && (s.suggestion || isCoachingSuggestion);
+      // Check if suggestion has the required fields
+      const hasRequiredFields = s.original && s.explanation;
       
       if (hasRequiredFields) {
         const occurrences = findOccurrences(docText, s.original);
@@ -191,18 +208,26 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
           if (from > 0 && to <= docSize + 1 && from < to) {
             try {
               tr.addMark(from, to, editorInstance.schema.marks.suggestion.create({
-                suggestion: s.suggestion,
+                suggestion: s.suggestion || '', // Handle empty suggestions
                 original: s.original,
                 explanation: s.explanation,
                 category: s.category,
               }));
+              appliedCount++;
+              console.log(`✓ Applied mark for "${s.original}" → "${s.suggestion || 'no suggestion'}"`);
             } catch (markError) {
               console.warn('Failed to apply mark:', { s, markError });
             }
           }
+        } else {
+          console.log(`❌ Could not find "${s.original}" in document text`);
         }
+      } else {
+        console.log(`❌ Skipping suggestion with missing fields:`, s);
       }
     });
+    
+    console.log(`✅ Applied ${appliedCount} out of ${suggestions.length} suggestion marks`);
     
     // Re-apply existing evidence and argument suggestions
     existingEvidenceAndArgument.forEach((s) => {
@@ -230,127 +255,205 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
       StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
       Suggestion.configure({
         HTMLAttributes: {
-          class: 'suggestion-mark', // This is a base class
+          class: 'suggestion-mark',
         },
       }),
     ],
     content: initialDocument.content || '',
     immediatelyRender: false,
-    onSelectionUpdate: ({ editor: editorInstance }) => {
-      const attrs = editorInstance.getAttributes('suggestion');
-      if (attrs && attrs.original && attrs.explanation) {
-        // Evidence and argument suggestions have empty suggestion fields but are still valid
-        const isCoachingSuggestion = attrs.category === 'evidence' || attrs.category === 'argument';
-        const hasValidContent = attrs.suggestion || isCoachingSuggestion;
-        
-        if (hasValidContent) {
-          setCurrentSuggestion({
-            suggestion: attrs.suggestion || '',
-            explanation: attrs.explanation,
-            original: attrs.original,
-            category: attrs.category,
-          });
-          setShowSuggestionPopup(true);
-        } else {
-          setShowSuggestionPopup(false);
-          setCurrentSuggestion(null);
-        }
-      } else {
-        setShowSuggestionPopup(false);
-        setCurrentSuggestion(null);
-      }
-    },
     onUpdate: ({ editor: editorInstance }) => {
       if (isApplyingSuggestionsRef.current) return;
       
-      // Clear existing timeouts
+      // Clear existing timeout
       if (suggestionCheckTimeoutRef.current) {
         clearTimeout(suggestionCheckTimeoutRef.current);
       }
-      if (evidenceCheckTimeoutRef.current) {
-        clearTimeout(evidenceCheckTimeoutRef.current);
+
+      // Get current text and cursor position
+      const currentText = editorInstance.getText();
+      const currentPosition = editorInstance.state.selection.from;
+      
+      // Smart content filtering - skip trivial changes
+      const textChanged = currentText !== lastAnalyzedContentRef.current;
+      const significantChange = Math.abs(currentText.length - lastAnalyzedContentRef.current.length) > 3;
+      const hasActualContent = currentText.trim().length > 15;
+      const hasCompleteWords = currentText.split(' ').length > 3;
+      
+      // Skip if change is too minor or content is insufficient
+      if (!textChanged || !significantChange || !hasActualContent || !hasCompleteWords) {
+        return;
       }
 
-      // Schedule real-time suggestion checks (grammar + academic voice) - optimized timing
-      suggestionCheckTimeoutRef.current = setTimeout(() => {
-        runSuggestionCheck(editorInstance);
-      }, 4000); // Increased from 2s to 4s for better performance
+      // Enhanced debounce: adapt based on change type and content length
+      const changeSize = Math.abs(currentText.length - lastAnalyzedContentRef.current.length);
+      const isTypingFast = Date.now() - (lastAnalyzedContentRef.current ? 0 : Date.now()) < 1000;
+      
+      let debounceTime = 1500; // Base debounce for fast typing
+      if (changeSize > 50) debounceTime = 2500; // Longer for major edits
+      if (currentText.length > 500) debounceTime += 500; // Extra delay for long content
+      if (isTypingFast) debounceTime = Math.max(debounceTime, 2000); // Prevent rapid-fire requests
 
-      // Schedule evidence checks (quote dropping detection) - optimized timing
-      evidenceCheckTimeoutRef.current = setTimeout(() => {
-        runEvidenceCheck(editorInstance);
-      }, 6000); // Increased from 3s to 6s, staggered to avoid API overload
+      // Schedule smart grammar check with incremental analysis
+      suggestionCheckTimeoutRef.current = setTimeout(() => {
+        runIncrementalGrammarCheck(editorInstance, currentPosition);
+      }, debounceTime);
+
+      // Update refs
+      lastCursorPositionRef.current = currentPosition;
 
       // Trigger critical thinking analysis
       analyzeCriticalThinking();
     },
     onCreate: ({ editor: editorInstance }) => {
+      // Initial check after a delay to let user start typing
       setTimeout(() => {
-        runSuggestionCheck(editorInstance);
-        runEvidenceCheck(editorInstance);
-      }, 1000);
+        const text = editorInstance.getText();
+        if (text.trim().length > 20) {
+          runIncrementalGrammarCheck(editorInstance, 0);
+        }
+      }, 2000);
     },
   });
 
-  const runSuggestionCheck = useCallback(async (editorInstance: ReturnType<typeof useEditor>) => {
+  const runIncrementalGrammarCheck = useCallback(async (editorInstance: ReturnType<typeof useEditor>, cursorPosition: number) => {
     if (!editorInstance) return;
 
-    const text = editorInstance.getText();
+    const fullText = editorInstance.getText();
     
-    // Enhanced content validation with performance optimizations
-    if (!text.trim() || text.length < 50) {
-      console.log('⏭️ Skipping suggestion check: content too short or empty');
-      
-      // Clear existing suggestions for empty/short content
-      if (!text.trim()) {
-        try {
-          const { tr } = editorInstance.state;
-          const docSize = editorInstance.state.doc.content.size;
-          tr.removeMark(0, docSize, editorInstance.schema.marks.suggestion);
-          editorInstance.view.dispatch(tr);
-        } catch (error) { 
-          console.error('Error clearing suggestions:', error);
-        }
-      }
+    // Skip if content is too short or empty
+    if (!fullText.trim() || fullText.length < 20) {
+      console.log('⏭️ Skipping: content too short');
+      setCurrentSuggestions([]);
       return;
     }
 
-    console.log('🔍 Running optimized suggestion check...');
+    // **KEY OPTIMIZATION**: Extract context around cursor for focused analysis
+    const contextWindow = 400; // Increased from 300 to ensure full sentences
     
-    // Get real-time suggestions (now with caching and optimizations)
-    const allSuggestions = await checkText(text);
-
-    if (allSuggestions.length > 0) {
-      console.log(`✅ Found ${allSuggestions.length} suggestions`);
-      applySuggestionsToEditor(editorInstance, allSuggestions);
+    // For positions near the start of document, always include from beginning
+    const isNearStart = cursorPosition < 100;
+    const isNearEnd = cursorPosition > fullText.length - 100;
+    
+    let contextStart, contextEnd;
+    
+    if (isNearStart) {
+      // Near start: analyze from beginning to ensure we catch sentence starts
+      contextStart = 0;
+      contextEnd = Math.min(fullText.length, contextWindow * 2); // Larger window for start
+    } else if (isNearEnd) {
+      // Near end: analyze the end portion
+      contextStart = Math.max(0, fullText.length - contextWindow * 2);
+      contextEnd = fullText.length;
     } else {
-      console.log('✅ No new suggestions found');
+      // Middle of document: find sentence boundaries around cursor
+      const beforeCursor = fullText.substring(0, cursorPosition);
+      const afterCursor = fullText.substring(cursorPosition);
+      
+      const lastSentenceStart = Math.max(
+        beforeCursor.lastIndexOf('. '),
+        beforeCursor.lastIndexOf('! '),
+        beforeCursor.lastIndexOf('? '),
+        beforeCursor.lastIndexOf('\n\n'),
+        Math.max(0, cursorPosition - contextWindow)
+      );
+      
+      const nextSentenceEnd = Math.min(
+        afterCursor.indexOf('. ') !== -1 ? cursorPosition + afterCursor.indexOf('. ') + 1 : fullText.length,
+        afterCursor.indexOf('! ') !== -1 ? cursorPosition + afterCursor.indexOf('! ') + 1 : fullText.length,
+        afterCursor.indexOf('? ') !== -1 ? cursorPosition + afterCursor.indexOf('? ') + 1 : fullText.length,
+        afterCursor.indexOf('\n\n') !== -1 ? cursorPosition + afterCursor.indexOf('\n\n') + 1 : fullText.length,
+        Math.min(fullText.length, cursorPosition + contextWindow)
+      );
+
+      contextStart = lastSentenceStart;
+      contextEnd = nextSentenceEnd;
+    }
+    
+    // Extract the context text
+    let contextText = fullText.substring(contextStart, contextEnd).trim();
+    
+    // Ensure we have meaningful content
+    if (contextText.length < 50 && !isNearStart) {
+      // Fallback: expand to word boundaries if context is too small
+      const expandedStart = Math.max(0, cursorPosition - contextWindow);
+      const expandedEnd = Math.min(fullText.length, cursorPosition + contextWindow);
+      contextText = fullText.substring(expandedStart, expandedEnd).trim();
+      contextStart = expandedStart;
+      contextEnd = expandedEnd;
+    }
+    
+    // Skip if context is still too small
+    if (contextText.length < 20) {
+      console.log(`⏭️ Skipping: context too small (${contextText.length} chars)`);
+      return;
+    }
+
+    // Check if this specific context was already analyzed recently
+    const contextHash = createSimpleHash(contextText);
+    const lastHash = createSimpleHash(lastAnalyzedContentRef.current.substring(contextStart, contextEnd) || '');
+    
+    if (contextHash === lastHash) {
+      console.log('⏭️ Skipping: context unchanged');
+      return;
+    }
+
+    console.log(`🔍 Smart grammar check (${contextText.length} chars, pos: ${cursorPosition})`);
+    console.log(`📍 Context extraction: ${isNearStart ? 'NEAR_START' : isNearEnd ? 'NEAR_END' : 'MIDDLE'} (start:${contextStart}, end:${contextEnd})`);
+    console.log(`📝 Context being analyzed: "${contextText}"`);
+
+    try {
+      // **PERFORMANCE CRITICAL**: Only analyze the focused context
+      const grammarSuggestions = await checkText(contextText, 'grammar');
+
+      if (grammarSuggestions.length > 0) {
+        console.log(`✅ Found ${grammarSuggestions.length} grammar suggestions in context`);
+        
+        // Debug: Log what we actually received
+        grammarSuggestions.forEach((s, i) => {
+          console.log(`📋 Suggestion ${i + 1}:`, {
+            original: s.original,
+            suggestion: s.suggestion,
+            explanation: s.explanation,
+            hasSuggestion: !!s.suggestion
+          });
+        });
+        
+        // Map suggestions back to full document positions
+        const mappedSuggestions = grammarSuggestions.map(suggestion => ({
+          ...suggestion,
+          original: suggestion.original, // Keep original for finding in full text
+          contextOffset: contextStart // Store where this context starts in full doc
+        }));
+        
+        // Apply suggestions (they'll be mapped back to full document positions)
+        applySuggestionsToEditor(editorInstance, mappedSuggestions);
+        setCurrentSuggestions(mappedSuggestions);
+      } else {
+        console.log('✅ No grammar issues in current context');
+        // Only clear suggestions that were in this context area
+        setCurrentSuggestions(prev => prev.filter(s => {
+          const occurrences = findOccurrences(fullText, s.original);
+          return occurrences.length === 0 || occurrences[0].start < contextStart || occurrences[0].start > contextEnd;
+        }));
+      }
+      
+      lastAnalyzedContentRef.current = fullText;
+      
+    } catch (error) {
+      console.error('Grammar check error:', error);
     }
   }, [checkText, applySuggestionsToEditor]);
 
-  const runEvidenceCheck = useCallback(async (editorInstance: ReturnType<typeof useEditor>) => {
-    if (!editorInstance) return;
-
-    const text = editorInstance.getText();
-    
-    // Enhanced content validation - skip if too short or no quotes likely
-    if (!text.trim() || text.length < 100 || !text.includes('"')) {
-      console.log('⏭️ Skipping evidence check: content too short or no quotes detected');
-      return;
+  // Helper function for simple hashing
+  const createSimpleHash = useCallback((text: string): string => {
+    let hash = 0;
+    for (let i = 0; i < text.length; i++) {
+      const char = text.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash;
     }
-
-    console.log('🔍 Running optimized evidence check...');
-
-    // Get evidence suggestions (quote dropping detection with caching)
-    const evidenceSuggestions = await checkEvidence(text);
-
-    if (evidenceSuggestions.length > 0) {
-      console.log(`✅ Found ${evidenceSuggestions.length} evidence suggestions`);
-      applySuggestionsToEditor(editorInstance, evidenceSuggestions, false);
-    } else {
-      console.log('✅ No evidence issues found');
-    }
-  }, [checkEvidence, applySuggestionsToEditor]);
+    return hash.toString();
+  }, []);
 
   // Define all hooks before the early return
   const handleArgumentSuggestionClick = useCallback((suggestion: typeof argumentSuggestions[0]) => {
@@ -367,10 +470,6 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
       
       // Set selection to the problematic text
       editor.chain().focus().setTextSelection({ from, to }).run();
-      
-      // Show the suggestion popup
-      setCurrentSuggestion(suggestion);
-      setShowSuggestionPopup(true);
     }
   }, [editor]);
 
@@ -378,7 +477,6 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
     if (!editor) return;
     
     setIsAnalyzingArgument(true);
-    setArgumentSidebarOpen(true);
     const text = editor.getText();
     
     try {
@@ -395,6 +493,48 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
       setIsAnalyzingArgument(false);
     }
   }, [editor, analyzeArgument, applySuggestionsToEditor]);
+
+  const handleAnalyzeClarity = useCallback(async () => {
+    if (!editor) return;
+    
+    setIsAnalyzingClarity(true);
+    const text = editor.getText();
+    
+    try {
+      console.log('🔍 Analyzing clarity...');
+      const suggestions = await checkAcademicVoice(text);
+      setClaritySuggestions(suggestions);
+      
+      if (suggestions.length > 0) {
+        applySuggestionsToEditor(editor, suggestions, false);
+      }
+    } catch (error) {
+      console.error('Error analyzing clarity:', error);
+    } finally {
+      setIsAnalyzingClarity(false);
+    }
+  }, [editor, checkAcademicVoice, applySuggestionsToEditor]);
+
+  const handleAnalyzeEvidence = useCallback(async () => {
+    if (!editor) return;
+    
+    setIsAnalyzingEvidence(true);
+    const text = editor.getText();
+    
+    try {
+      console.log('🔍 Analyzing evidence...');
+      const suggestions = await checkEvidence(text);
+      setEvidenceSuggestions(suggestions);
+      
+      if (suggestions.length > 0) {
+        applySuggestionsToEditor(editor, suggestions, false);
+      }
+    } catch (error) {
+      console.error('Error analyzing evidence:', error);
+    } finally {
+      setIsAnalyzingEvidence(false);
+    }
+  }, [editor, checkEvidence, applySuggestionsToEditor]);
 
   const saveDocument = useCallback(async () => {
     if (!editor) return;
@@ -443,12 +583,6 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
     }
   }, [editor, handleThesisSidebarClose]);
 
-  const handleArgumentSidebarClose = useCallback(() => {
-    setArgumentSidebarOpen(false);
-    setArgumentSuggestions([]);
-    setDocumentAnalysis(null);
-  }, []);
-
   const handleExport = useCallback((format: ExportFormat) => {
     if (!editor) return;
     
@@ -456,73 +590,7 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
     exportDocument(format, title || 'Untitled Document', content);
   }, [editor, title]);
 
-  const acceptSuggestion = useCallback(() => {
-    if (!editor || !currentSuggestion || isAcceptingSuggestion) return;
-    
-    setIsAcceptingSuggestion(true);
-    const suggestionToAccept = currentSuggestion;
-    isApplyingSuggestionsRef.current = true;
-    
-    const { state } = editor;
-    const text = state.doc.textContent;
-    
-    const occurrences = findOccurrences(text, suggestionToAccept.original);
-    
-    if (occurrences.length === 0) {
-      setIsAcceptingSuggestion(false);
-      isApplyingSuggestionsRef.current = false;
-      return;
-    }
-    
-    let targetOccurrence = occurrences[0];
-    if (occurrences.length > 1) {
-      const cursorPos = state.selection.from;
-      targetOccurrence = occurrences.reduce((prev, curr) => {
-        const prevDist = Math.abs((prev.start + 1) - cursorPos);
-        const currDist = Math.abs((curr.start + 1) - cursorPos);
-        return currDist < prevDist ? curr : prev;
-      });
-    }
-    
-    const tipTapStart = targetOccurrence.start + 1;
-    const tipTapEnd = targetOccurrence.end + 1;
-    
-    try {
-      // Only replace text for suggestions that have replacement text
-      // Evidence, argument coaching categories don't replace text - they just provide feedback
-      const nonReplacementCategories = ['evidence', 'argument', 'claim_support', 'fallacy', 'consistency', 'logical_flow'];
-      if (!nonReplacementCategories.includes(currentSuggestion.category) && currentSuggestion.suggestion) {
-        editor
-          .chain()
-          .focus()
-          .setTextSelection({ from: tipTapStart, to: tipTapEnd })
-          .deleteSelection()
-          .insertContent(suggestionToAccept.suggestion)
-          .run();
-      }
-      
-      const { tr } = editor.state;
-      const docSize = editor.state.doc.content.size;
-      tr.removeMark(0, docSize, editor.schema.marks.suggestion);
-      editor.view.dispatch(tr);
-    } catch (error) {
-      console.error('Error during replacement:', error);
-    }
-    
-    setTimeout(() => {
-      isApplyingSuggestionsRef.current = false;
-      setIsAcceptingSuggestion(false);
-      setShowSuggestionPopup(false);
-      setCurrentSuggestion(null);
-      
-      if (suggestionCheckTimeoutRef.current) {
-        clearTimeout(suggestionCheckTimeoutRef.current);
-      }
-      suggestionCheckTimeoutRef.current = setTimeout(() => {
-        runSuggestionCheck(editor);
-      }, 2000); // Reduced re-check delay after accepting suggestion
-    }, 100);
-  }, [editor, currentSuggestion, isAcceptingSuggestion, runSuggestionCheck]);
+  // Removed acceptSuggestion function since we handle it inline in the sidebar
 
   // Add critical thinking analysis function
   const analyzeCriticalThinking = useCallback(() => {
@@ -556,9 +624,6 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
       if (suggestionCheckTimeoutRef.current) {
         clearTimeout(suggestionCheckTimeoutRef.current);
       }
-      if (evidenceCheckTimeoutRef.current) {
-        clearTimeout(evidenceCheckTimeoutRef.current);
-      }
     };
   }, []);
 
@@ -567,30 +632,599 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
     return <div>Loading Editor...</div>;
   }
 
-  const suggestionCategoryTitles: Record<SuggestionCategory, string> = {
-    grammar: 'Grammar Suggestion',
-    academic_voice: 'Academic Voice Suggestion', 
-    evidence: 'Evidence Integration',
-    argument: 'Argument Analysis',
-    claim_support: 'Claim Support',
-    fallacy: 'Logical Fallacy',
-    consistency: 'Consistency Issue',
-    logical_flow: 'Logical Flow',
-  };
-
-  const suggestionCategoryIcons: Record<SuggestionCategory, React.ReactNode> = {
-    grammar: <MessageSquare className="h-4 w-4" />,
-    academic_voice: <Zap className="h-4 w-4" />,
-    evidence: <Lightbulb className="h-4 w-4" />,
-    argument: <Brain className="h-4 w-4" />,
-    claim_support: <Target className="h-4 w-4" />,
-    fallacy: <AlertTriangle className="h-4 w-4" />,
-    consistency: <Zap className="h-4 w-4" />,
-    logical_flow: <ArrowRight className="h-4 w-4" />,
-  };
+  // Removed suggestionCategoryTitles and suggestionCategoryIcons since they're now handled in the sidebar
 
   return (
     <>
+      {/* Remove the overlay sidebars - they'll be integrated into the right sidebar */}
+      
+      {/* Main two-column layout */}
+      <div className="flex h-screen w-full">
+        {/* Left side - Main editor */}
+        <div className="flex-1 flex flex-col">
+          {/* Header section - simplified */}
+          <div className="border-b border-gray-200 bg-white px-6 py-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4 flex-1">
+                <Link href="/dashboard">
+                  <Button variant="ghost" size="sm" className="text-gray-600 hover:text-gray-900">
+                    <ArrowLeft className="h-4 w-4 mr-2" />
+                    Back to Dashboard
+                  </Button>
+                </Link>
+                <input
+                  type="text"
+                  value={title}
+                  onChange={e => setTitle(e.target.value)}
+                  className="text-2xl font-bold bg-transparent focus:outline-none flex-1"
+                  placeholder="Untitled Document"
+                />
+              </div>
+              <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm">
+                      <Download className="h-4 w-4 mr-2" />
+                      Export
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuLabel>Export Document</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => handleExport('pdf')}>
+                      <Printer className="h-4 w-4 mr-2" />
+                      PDF (.pdf)
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleExport('docx')}>
+                      <FileText className="h-4 w-4 mr-2" />
+                      Word (.docx)
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                {isChecking && <div>Checking...</div>}
+                {isSaving ? (
+                  <div>Saving...</div>
+                ) : (
+                  <div className="text-green-600">Saved</div>
+                )}
+                {engineError && <div className="text-destructive">{engineError}</div>}
+              </div>
+            </div>
+          </div>
+
+          {/* Main editor container */}
+          <div className="flex-1 overflow-auto">
+            <div className="max-w-4xl mx-auto p-8">
+              {editor && (
+                <BubbleMenu
+                  editor={editor}
+                  tippyOptions={{ duration: 100 }}
+                  shouldShow={({ state }) => {
+                    const { from, to } = state.selection;
+                    return from !== to;
+                  }}
+                >
+                  <div className="p-1 bg-background border rounded-lg shadow-md">
+                    <Button variant="ghost" size="sm" onClick={handleThesisSidebarOpen}>
+                      Analyze as Thesis
+                    </Button>
+                  </div>
+                </BubbleMenu>
+              )}
+
+              <div className="relative editor-container">
+                <EditorContent editor={editor} className="prose dark:prose-invert max-w-none fade-in" />
+                <CriticalThinkingMargin 
+                  prompts={criticalThinkingPrompts}
+                  onDismiss={dismissCriticalPrompt}
+                  editorElement={editor?.view.dom || null}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Right sidebar - Persistent suggestions panel */}
+        <div className="w-80 border-l border-gray-200 bg-gray-50/50 backdrop-blur-sm overflow-y-auto">
+          <div className="h-full p-4">
+            <h2 className="text-lg font-semibold mb-4 text-gray-900">
+              Review suggestions
+            </h2>
+
+            {/* Check if there are any active suggestions to show */}
+            {(() => {
+              const activeSuggestions = currentSuggestions.length + argumentSuggestions.length + claritySuggestions.length + evidenceSuggestions.length;
+              
+              if (activeSuggestions === 0) {
+                // Only show green checkmark if suggestions have been processed (accepted/dismissed)
+                if (hasProcessedSuggestions) {
+                  return (
+                    <div className="text-center py-6 mb-6 bg-green-50 rounded-lg border border-green-200">
+                      <div className="text-4xl mb-3">✅</div>
+                      <h3 className="text-lg font-semibold text-gray-900 mb-1">You're on point!</h3>
+                      <p className="text-gray-600 text-sm">All suggestions have been reviewed.</p>
+                    </div>
+                  );
+                } else {
+                  // Show neutral state when no suggestions initially
+                  return (
+                    <div className="text-center py-6 mb-6 bg-gray-50 rounded-lg border border-gray-200">
+                      <div className="text-2xl mb-3">📝</div>
+                      <h3 className="text-lg font-semibold text-gray-900 mb-1">Ready to write</h3>
+                      <p className="text-gray-600 text-sm">No suggestions available. Start writing to get AI feedback.</p>
+                    </div>
+                  );
+                }
+              }
+              
+              return null;
+            })()}
+
+            {/* Suggestion categories - always show the tools/on-demand options */}
+            <div className="space-y-4">
+              {/* Correctness section */}
+              {(() => {
+                const correctnessSuggestions = currentSuggestions.filter(s => s.category === 'grammar');
+                return (
+                  <div className="bg-white rounded-lg border border-blue-200 p-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <MessageSquare className="h-4 w-4 text-blue-600" />
+                      <h3 className="font-medium text-blue-900">Correctness</h3>
+                      <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full">
+                        {correctnessSuggestions.length}
+                      </span>
+                    </div>
+                    <p className="text-sm text-blue-700 mb-3">
+                      Grammar and spelling corrections
+                    </p>
+                    
+                    {/* Show grammar suggestions */}
+                    {correctnessSuggestions.length > 0 && (
+                      <div className="space-y-2">
+                        {correctnessSuggestions.slice(0, 3).map((suggestion, index) => (
+                          <div 
+                            key={index}
+                            className="p-2 bg-red-50 rounded border border-red-100 cursor-pointer hover:bg-red-100 transition-colors"
+                            onClick={() => {
+                              if (!editor) return;
+                              const text = editor.state.doc.textContent;
+                              const occurrences = findOccurrences(text, suggestion.original);
+                              if (occurrences.length > 0) {
+                                const { start, end } = occurrences[0];
+                                const from = start + 1;
+                                const to = end + 1;
+                                editor.chain().focus().setTextSelection({ from, to }).run();
+                              }
+                            }}
+                          >
+                            <p className="text-xs font-medium text-red-800">
+                              &quot;{suggestion.original.substring(0, 40)}...&quot;
+                            </p>
+                            <p className="text-xs text-red-600 mt-1">
+                              {suggestion.explanation.substring(0, 60)}...
+                            </p>
+                            {suggestion.suggestion && (
+                              <p className="text-xs text-green-700 mt-1 font-medium">
+                                → &quot;{suggestion.suggestion}&quot;
+                              </p>
+                            )}
+                            {suggestion.suggestion && (
+                              <div className="mt-2 flex gap-2">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="text-xs h-6"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (!editor) return;
+                                    
+                                    console.log(`🔄 Accepting suggestion: "${suggestion.original}" → "${suggestion.suggestion}"`);
+                                    
+                                    const text = editor.state.doc.textContent;
+                                    const occurrences = findOccurrences(text, suggestion.original);
+                                    if (occurrences.length > 0) {
+                                      const { start, end } = occurrences[0];
+                                      const from = start + 1;
+                                      const to = end + 1;
+                                      
+                                      // Apply the change
+                                      editor.chain().focus().setTextSelection({ from, to }).deleteSelection().insertContent(suggestion.suggestion).run();
+                                      
+                                      // Remove from suggestions state
+                                      setCurrentSuggestions(prev => prev.filter(s => s.original !== suggestion.original));
+                                      
+                                      // Mark that suggestions have been processed
+                                      setHasProcessedSuggestions(true);
+                                      
+                                      // Clear the suggestion mark from editor
+                                      setTimeout(() => {
+                                        const { tr } = editor.state;
+                                        const newText = editor.state.doc.textContent;
+                                        
+                                        // Remove all marks for this original text
+                                        editor.state.doc.descendants((node, pos) => {
+                                          node.marks.forEach((mark) => {
+                                            if (mark.type.name === 'suggestion' && mark.attrs.original === suggestion.original) {
+                                              tr.removeMark(pos, pos + node.nodeSize, editor.schema.marks.suggestion);
+                                            }
+                                          });
+                                        });
+                                        
+                                        if (tr.steps.length > 0) {
+                                          editor.view.dispatch(tr);
+                                        }
+                                        
+                                        console.log(`✅ Suggestion applied and mark removed`);
+                                      }, 100);
+                                    }
+                                  }}
+                                >
+                                  Accept
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="text-xs h-6"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    
+                                    console.log(`❌ Dismissing suggestion: "${suggestion.original}"`);
+                                    
+                                    // Remove from suggestions state
+                                    setCurrentSuggestions(prev => prev.filter(s => s.original !== suggestion.original));
+                                    
+                                    // Mark that suggestions have been processed
+                                    setHasProcessedSuggestions(true);
+                                    
+                                    // Clear the suggestion mark from editor
+                                    setTimeout(() => {
+                                      const { tr } = editor.state;
+                                      
+                                      // Remove all marks for this original text
+                                      editor.state.doc.descendants((node, pos) => {
+                                        node.marks.forEach((mark) => {
+                                          if (mark.type.name === 'suggestion' && mark.attrs.original === suggestion.original) {
+                                            tr.removeMark(pos, pos + node.nodeSize, editor.schema.marks.suggestion);
+                                          }
+                                        });
+                                      });
+                                      
+                                      if (tr.steps.length > 0) {
+                                        editor.view.dispatch(tr);
+                                      }
+                                      
+                                      console.log(`✅ Suggestion dismissed and mark removed`);
+                                    }, 100);
+                                  }}
+                                >
+                                  Dismiss
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                        {correctnessSuggestions.length > 3 && (
+                          <p className="text-xs text-blue-600 text-center">
+                            +{correctnessSuggestions.length - 3} more suggestions
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* Clarity section */}
+              <div className="bg-white rounded-lg border border-amber-200 p-4">
+                <div className="flex items-start justify-between mb-4">
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <Zap className="h-5 w-5 text-amber-600 flex-shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <h3 className="font-semibold text-amber-900 text-sm">Clarity</h3>
+                        <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">
+                          {claritySuggestions.length}
+                        </span>
+                      </div>
+                      <p className="text-xs text-amber-700">
+                        Academic voice and style improvements
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleAnalyzeClarity}
+                    disabled={isAnalyzingClarity}
+                    className="text-xs px-3 py-1.5 flex-shrink-0 ml-3"
+                  >
+                    {isAnalyzingClarity ? (
+                      <>
+                        <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                        Analyzing...
+                      </>
+                    ) : (
+                      'Analyze'
+                    )}
+                  </Button>
+                </div>
+                    
+                {/* Show clarity suggestions */}
+                {claritySuggestions.length > 0 && (
+                  <div className="space-y-2">
+                    {claritySuggestions.slice(0, 3).map((suggestion, index) => (
+                      <div 
+                        key={index}
+                        className="p-2 bg-amber-50 rounded border border-amber-100 cursor-pointer hover:bg-amber-100 transition-colors"
+                        onClick={() => {
+                          if (!editor) return;
+                          const text = editor.state.doc.textContent;
+                          const occurrences = findOccurrences(text, suggestion.original);
+                          if (occurrences.length > 0) {
+                            const { start, end } = occurrences[0];
+                            const from = start + 1;
+                            const to = end + 1;
+                            editor.chain().focus().setTextSelection({ from, to }).run();
+                          }
+                        }}
+                      >
+                        <p className="text-xs font-medium text-amber-800">
+                          &quot;{suggestion.original.substring(0, 40)}...&quot;
+                        </p>
+                        <p className="text-xs text-amber-600 mt-1">
+                          {suggestion.explanation.substring(0, 60)}...
+                        </p>
+                        {suggestion.suggestion && (
+                          <div className="mt-2 flex gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="text-xs h-6"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (!editor) return;
+                                const text = editor.state.doc.textContent;
+                                const occurrences = findOccurrences(text, suggestion.original);
+                                if (occurrences.length > 0) {
+                                  const { start, end } = occurrences[0];
+                                  const from = start + 1;
+                                  const to = end + 1;
+                                  editor.chain().focus().setTextSelection({ from, to }).deleteSelection().insertContent(suggestion.suggestion).run();
+                                  setClaritySuggestions(prev => prev.filter(s => s.original !== suggestion.original));
+                                  setHasProcessedSuggestions(true);
+                                }
+                              }}
+                            >
+                              Accept
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="text-xs h-6"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setClaritySuggestions(prev => prev.filter(s => s.original !== suggestion.original));
+                                setHasProcessedSuggestions(true);
+                              }}
+                            >
+                              Dismiss
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                    {claritySuggestions.length > 3 && (
+                      <p className="text-xs text-amber-600 text-center">
+                        +{claritySuggestions.length - 3} more suggestions
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Evidence section */}
+              <div className="bg-white rounded-lg border border-blue-200 p-4">
+                <div className="flex items-start justify-between mb-4">
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <Target className="h-5 w-5 text-blue-600 flex-shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <h3 className="font-semibold text-blue-900 text-sm">Evidence</h3>
+                        <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">
+                          {evidenceSuggestions.length}
+                        </span>
+                      </div>
+                      <p className="text-xs text-blue-700">
+                        Quote integration and citation improvements
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleAnalyzeEvidence}
+                    disabled={isAnalyzingEvidence}
+                    className="text-xs px-3 py-1.5 flex-shrink-0 ml-3"
+                  >
+                    {isAnalyzingEvidence ? (
+                      <>
+                        <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                        Analyzing...
+                      </>
+                    ) : (
+                      'Analyze'
+                    )}
+                  </Button>
+                </div>
+                
+                {/* Show evidence suggestions */}
+                {evidenceSuggestions.length > 0 && (
+                  <div className="space-y-2">
+                    {evidenceSuggestions.slice(0, 3).map((suggestion, index) => (
+                      <div 
+                        key={index}
+                        className="p-2 bg-blue-50 rounded border border-blue-100 cursor-pointer hover:bg-blue-100 transition-colors"
+                        onClick={() => {
+                          if (!editor) return;
+                          const text = editor.state.doc.textContent;
+                          const occurrences = findOccurrences(text, suggestion.original);
+                          if (occurrences.length > 0) {
+                            const { start, end } = occurrences[0];
+                            const from = start + 1;
+                            const to = end + 1;
+                            editor.chain().focus().setTextSelection({ from, to }).run();
+                          }
+                        }}
+                      >
+                        <p className="text-xs font-medium text-blue-800">
+                          &quot;{suggestion.original.substring(0, 40)}...&quot;
+                        </p>
+                        <p className="text-xs text-blue-600 mt-1">
+                          {suggestion.explanation.substring(0, 60)}...
+                        </p>
+                        {suggestion.suggestion && (
+                          <div className="mt-2 flex gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="text-xs h-6"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (!editor) return;
+                                const text = editor.state.doc.textContent;
+                                const occurrences = findOccurrences(text, suggestion.original);
+                                if (occurrences.length > 0) {
+                                  const { start, end } = occurrences[0];
+                                  const from = start + 1;
+                                  const to = end + 1;
+                                  editor.chain().focus().setTextSelection({ from, to }).deleteSelection().insertContent(suggestion.suggestion).run();
+                                  setEvidenceSuggestions(prev => prev.filter(s => s.original !== suggestion.original));
+                                  setHasProcessedSuggestions(true);
+                                }
+                              }}
+                            >
+                              Accept
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="text-xs h-6"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEvidenceSuggestions(prev => prev.filter(s => s.original !== suggestion.original));
+                                setHasProcessedSuggestions(true);
+                              }}
+                            >
+                              Dismiss
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                    {evidenceSuggestions.length > 3 && (
+                      <p className="text-xs text-blue-600 text-center">
+                        +{evidenceSuggestions.length - 3} more suggestions
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Argument Analysis section */}
+              <div className="bg-white rounded-lg border border-purple-200 p-4">
+                <div className="flex items-start justify-between mb-4">
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <Brain className="h-5 w-5 text-purple-600 flex-shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <h3 className="font-semibold text-purple-900 text-sm">Arguments</h3>
+                        <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-medium">
+                          {argumentSuggestions.length}
+                        </span>
+                      </div>
+                      <p className="text-xs text-purple-700">
+                        Strengthen your argument structure
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleAnalyzeArgument}
+                    disabled={isAnalyzingArgument}
+                    className="text-xs px-3 py-1.5 flex-shrink-0 ml-3"
+                  >
+                    {isAnalyzingArgument ? (
+                      <>
+                        <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                        Analyzing...
+                      </>
+                    ) : (
+                      'Analyze'
+                    )}
+                  </Button>
+                </div>
+                
+                {/* Show argument suggestions */}
+                {argumentSuggestions.length > 0 && (
+                  <div className="mt-3 space-y-2">
+                    {argumentSuggestions.slice(0, 3).map((suggestion, index) => (
+                      <div 
+                        key={index}
+                        className="p-2 bg-purple-50 rounded border border-purple-100 cursor-pointer hover:bg-purple-100 transition-colors"
+                        onClick={() => handleArgumentSuggestionClick(suggestion)}
+                      >
+                        <p className="text-xs font-medium text-purple-800">
+                          &quot;{suggestion.original.substring(0, 40)}...&quot;
+                        </p>
+                        <p className="text-xs text-purple-600 mt-1">
+                          {suggestion.explanation.substring(0, 60)}...
+                        </p>
+                      </div>
+                    ))}
+                    {argumentSuggestions.length > 3 && (
+                      <p className="text-xs text-purple-600 text-center">
+                        +{argumentSuggestions.length - 3} more suggestions
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Thesis Analysis section */}
+              <div className="bg-white rounded-lg border border-indigo-200 p-4">
+                <div className="flex items-start justify-between mb-4">
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <Lightbulb className="h-5 w-5 text-indigo-600 flex-shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <h3 className="font-semibold text-indigo-900 text-sm">Thesis</h3>
+                        <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-medium">
+                          0
+                        </span>
+                      </div>
+                      <p className="text-xs text-indigo-700">
+                        Improve your thesis statement
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleThesisSidebarOpen}
+                    disabled={!editor}
+                    className="text-xs px-3 py-1.5 flex-shrink-0 ml-3"
+                  >
+                    Analyze
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Keep the thesis sidebar as modal for now since it needs user interaction */}
       {isThesisSidebarOpen && (
         <ThesisSidebar
           selectedText={selectedTextForThesis}
@@ -598,195 +1232,14 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
           onReplace={handleReplaceThesis}
         />
       )}
-      
-      <ArgumentSidebar
-        isOpen={isArgumentSidebarOpen}
-        onClose={handleArgumentSidebarClose}
-        isAnalyzing={isAnalyzingArgument}
-        suggestions={argumentSuggestions}
-        documentAnalysis={documentAnalysis}
-        onSuggestionClick={handleArgumentSuggestionClick}
-      />
-      <div className="flex flex-col w-full max-w-4xl gap-4 p-8 mx-auto">
-        <div className="flex items-center justify-between">
-          <input
-            type="text"
-            value={title}
-            onChange={e => setTitle(e.target.value)}
-            className="w-full text-4xl font-bold bg-transparent focus:outline-none"
-            placeholder="Untitled Document"
-          />
-          <div className="flex items-center gap-4 text-sm text-muted-foreground">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm">
-                  <Download className="h-4 w-4 mr-2" />
-                  Export
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuLabel>Export Document</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => handleExport('txt')}>
-                  <FileText className="h-4 w-4 mr-2" />
-                  Text (.txt)
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => handleExport('html')}>
-                  <Globe className="h-4 w-4 mr-2" />
-                  HTML (.html)
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => handleExport('pdf')}>
-                  <Printer className="h-4 w-4 mr-2" />
-                  PDF (.pdf)
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            {isChecking && <div>Checking...</div>}
-            {isSaving ? (
-              <div>Saving...</div>
-            ) : (
-              <div className="text-green-600">Saved</div>
-            )}
-            {engineError && <div className="text-destructive">{engineError}</div>}
-          </div>
-        </div>
-
-        {/* Argument Analysis Controls */}
-        <div className="flex items-center justify-between mb-4 p-4 rounded-lg bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200">
-          <div className="flex items-center gap-3">
-            <Brain className="h-5 w-5 text-purple-600" />
-            <div>
-              <h3 className="font-semibold text-purple-900">Argument Analysis</h3>
-              <p className="text-sm text-purple-700">Get comprehensive feedback on your argument structure</p>
-            </div>
-          </div>
-          
-          <div className="flex items-center gap-3">
-            {argumentSuggestions.length > 0 && (
-              <div className="text-sm text-purple-700 flex items-center gap-2">
-                <AlertTriangle className="h-4 w-4" />
-                {argumentSuggestions.length} issue{argumentSuggestions.length !== 1 ? 's' : ''} found
-              </div>
-            )}
-            <Button 
-              onClick={handleAnalyzeArgument}
-              disabled={isAnalyzingArgument}
-              variant="default"
-              size="sm"
-              className="bg-purple-600 hover:bg-purple-700"
-            >
-              {isAnalyzingArgument ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Analyzing...
-                </>
-              ) : (
-                <>
-                  <Brain className="mr-2 h-4 w-4" />
-                  Analyze Argument
-                </>
-              )}
-            </Button>
-          </div>
-        </div>
-
-        {editor && (
-          <BubbleMenu
-            editor={editor}
-            tippyOptions={{ duration: 100 }}
-            shouldShow={({ state }) => {
-              const { from, to } = state.selection;
-              // Show menu only when there is a selection of text
-              return from !== to;
-            }}
-          >
-            <div className="p-1 bg-background border rounded-lg shadow-md">
-              <Button variant="ghost" size="sm" onClick={handleThesisSidebarOpen}>
-                Analyze as Thesis
-              </Button>
-            </div>
-          </BubbleMenu>
-        )}
-
-        {showSuggestionPopup && currentSuggestion && (
-          <div className="fixed bottom-4 right-4 p-4 bg-white/95 backdrop-blur-sm border border-gray-200 rounded-lg shadow-lg flex flex-col gap-3 max-w-sm z-50 suggestion-popup fade-in">
-            <div className="flex justify-between items-start">
-              <div className="flex items-center gap-2">
-                {suggestionCategoryIcons[currentSuggestion.category]}
-                <h4 className="font-medium text-sm text-gray-900">
-                  {suggestionCategoryTitles[currentSuggestion.category]}
-                </h4>
-              </div>
-              <button
-                onClick={() => {
-                  setShowSuggestionPopup(false);
-                  setCurrentSuggestion(null);
-                }}
-                className="text-gray-400 hover:text-gray-600 text-sm"
-              >
-                ✕
-              </button>
-            </div>
-            <div className="text-sm text-gray-700">
-              <p className="mb-2">{currentSuggestion.explanation}</p>
-              <p className="mb-3">
-                <span className="font-medium">Original:</span> &quot;{currentSuggestion.original}&quot;
-              </p>
-            </div>
-            {currentSuggestion.category === 'evidence' || currentSuggestion.category === 'argument' ? (
-              <Button
-                onClick={() => {
-                  setShowSuggestionPopup(false);
-                  setCurrentSuggestion(null);
-                }}
-                size="sm"
-                className="w-full"
-                variant="outline"
-              >
-                Got it!
-              </Button>
-            ) : currentSuggestion.suggestion ? (
-              <Button
-                onClick={acceptSuggestion}
-                size="sm"
-                className="w-full"
-                disabled={isAcceptingSuggestion}
-              >
-                {isAcceptingSuggestion ? "Accepting..." : `Accept: "${currentSuggestion.suggestion}"`}
-              </Button>
-            ) : (
-              <Button
-                onClick={() => {
-                  setShowSuggestionPopup(false);
-                  setCurrentSuggestion(null);
-                }}
-                size="sm"
-                className="w-full"
-                variant="outline"
-              >
-                Got it!
-              </Button>
-            )}
-          </div>
-        )}
-
-        <div className="relative editor-container">
-          <EditorContent editor={editor} className="prose dark:prose-invert max-w-none fade-in" />
-          <CriticalThinkingMargin 
-            prompts={criticalThinkingPrompts}
-            onDismiss={dismissCriticalPrompt}
-            editorElement={editor?.view.dom || null}
-          />
-        </div>
-              </div>
         
-        {/* Performance Debugger (Development Only) */}
-        {process.env.NODE_ENV === 'development' && (
-          <PerformanceDebugger 
-            isVisible={showDebugger}
-            onToggle={() => setShowDebugger(!showDebugger)}
-          />
-        )}
-      </>
-    );
-  } 
+      {/* Performance Debugger (Development Only) */}
+      {process.env.NODE_ENV === 'development' && (
+        <PerformanceDebugger 
+          isVisible={showDebugger}
+          onToggle={() => setShowDebugger(!showDebugger)}
+        />
+      )}
+    </>
+  );
+} 

@@ -41,11 +41,24 @@ interface CacheEntry {
 function createContentHash(text: string): string {
   let hash = 0;
   if (text.length === 0) return hash.toString();
-  for (let i = 0; i < text.length; i++) {
-    const char = text.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash; // Convert to 32-bit integer
+  
+  // Use a faster hashing algorithm for small texts
+  if (text.length < 500) {
+    for (let i = 0; i < text.length; i++) {
+      const char = text.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash;
+    }
+  } else {
+    // For larger texts, sample key positions to speed up hashing
+    const step = Math.floor(text.length / 100);
+    for (let i = 0; i < text.length; i += step) {
+      const char = text.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash;
+    }
   }
+  
   return Math.abs(hash).toString();
 }
 
@@ -116,29 +129,31 @@ export function useSuggestionEngine() {
   }, []);
 
   /**
-   * Optimized text checking with caching and combined API calls.
-   * Now makes a single API call for both grammar and academic voice suggestions.
+   * Optimized text checking with caching and optional scope control.
+   * Now supports grammar-only mode for real-time checking with aggressive optimization.
    *
    * @param text The text to analyze.
-   * @returns A promise that resolves to an array of real-time suggestions.
+   * @param scope Optional scope to limit analysis to 'grammar' only.
+   * @returns A promise that resolves to an array of suggestions.
    */
   const checkText = useCallback(
-    async (text: string): Promise<Suggestion[]> => {
+    async (text: string, scope?: 'grammar'): Promise<Suggestion[]> => {
       if (!text.trim() || text.length < MIN_CONTENT_LENGTH) {
         console.log('⏭️ Skipping analysis: content too short');
         return [];
       }
 
-      // Check cache first
-      const contentHash = createContentHash(text);
+      // Aggressive caching for small grammar checks
+      const cacheKey = scope === 'grammar' ? `${text.trim()}_grammar_v2` : text;
+      const contentHash = createContentHash(cacheKey);
       const cachedSuggestions = getCachedSuggestions(contentHash);
       if (cachedSuggestions) {
+        console.log(`📦 Cache hit for ${scope || 'full'} analysis`);
         return cachedSuggestions;
       }
 
-      // Check if content hasn't significantly changed (incremental analysis)
-      const contentChanged = text !== lastAnalyzedContentRef.current;
-      if (!contentChanged) {
+      // Skip if content is identical to recently analyzed (for non-grammar scope)  
+      if (!scope && text === lastAnalyzedContentRef.current) {
         console.log('⏭️ Skipping analysis: content unchanged');
         return [];
       }
@@ -147,22 +162,60 @@ export function useSuggestionEngine() {
       setError(null);
 
       try {
-        console.log('🔍 Analyzing new content...');
+        const startTime = performance.now();
+        console.log(`🔍 ${scope === 'grammar' ? 'Fast grammar' : 'Full'} analysis (${text.length} chars)...`);
         
-        // Combined API call for both grammar and academic voice
-        const result = await measurePerformance('Combined Suggestion Check', async () => {
+        if (scope === 'grammar') {
+          // **OPTIMIZED GRAMMAR-ONLY PATH**
+          const result = await measurePerformance('Fast Grammar Check', async () => {
+            const { data, error: invokeError } = await supabase.functions.invoke(
+              'grammar-check',
+              { 
+                body: { 
+                  text: text.trim(),
+                  mode: 'fast', // Signal for optimized processing
+                  maxSuggestions: 15 // Increased to catch more errors
+                } 
+              },
+            );
+
+            if (invokeError) {
+              throw new Error(`Grammar check error: ${invokeError.message}`);
+            }
+            
+            return data;
+          });
+
+          const grammarSuggestions = (result.suggestions || [])
+            .slice(0, 10) // Hard limit to prevent slowdowns
+            .map((s: Omit<Suggestion, 'category'>) => ({
+              ...s,
+              category: 'grammar' as const,
+            }));
+
+          // Aggressive caching for grammar results
+          setCachedSuggestions(contentHash, grammarSuggestions);
+          
+          const duration = performance.now() - startTime;
+          console.log(`⚡ Grammar check completed in ${duration.toFixed(0)}ms`);
+          
+          return grammarSuggestions;
+        }
+        
+        // Original combined path for backward compatibility
+        const result = await measurePerformance('Combined Check', async () => {
           const { data, error: invokeError } = await supabase.functions.invoke(
             'grammar-check',
             { 
               body: { 
                 text,
-                includeAcademicVoice: true // Signal to include academic voice analysis
+                includeAcademicVoice: true
               } 
             },
           );
 
           if (invokeError) {
-            throw new Error(`Error from combined check: ${invokeError.message}`);
+            throw new Error(`Combined check error: ${invokeError.message}`);
           }
           
           return data;
@@ -171,7 +224,6 @@ export function useSuggestionEngine() {
         // Process combined results
         const allSuggestions: Suggestion[] = [];
         
-        // Grammar suggestions
         if (result.grammarSuggestions) {
           allSuggestions.push(...result.grammarSuggestions.map((s: Omit<Suggestion, 'category'>) => ({
             ...s,
@@ -179,7 +231,6 @@ export function useSuggestionEngine() {
           })));
         }
         
-        // Academic voice suggestions
         if (result.academicVoiceSuggestions) {
           allSuggestions.push(...result.academicVoiceSuggestions.map((s: Omit<Suggestion, 'category'>) => ({
             ...s,
@@ -187,46 +238,95 @@ export function useSuggestionEngine() {
           })));
         }
 
-        // Fallback to separate calls if combined API doesn't exist yet
+        // Fallback for separate API calls
         if (!result.grammarSuggestions && !result.academicVoiceSuggestions) {
-          console.log('📞 Fallback to separate API calls');
-          const promises = ['grammar', 'academic_voice'].map(async (category) => {
-            const functionName = category === 'grammar' ? 'grammar-check' : 'academic-voice';
-            
-            const { data, error: invokeError } = await supabase.functions.invoke(
-              functionName,
-              { body: { text } },
-            );
-
-            if (invokeError) {
-              throw new Error(`Error from '${functionName}': ${invokeError.message}`);
-            }
-            
-            return (data.suggestions || []).map((s: Omit<Suggestion, 'category'>) => ({
+          console.log('📞 Using fallback API calls');
+          const grammarResult = await supabase.functions.invoke('grammar-check', { body: { text } });
+          const academicResult = await supabase.functions.invoke('academic-voice', { body: { text } });
+          
+          if (!grammarResult.error && grammarResult.data?.suggestions) {
+            allSuggestions.push(...grammarResult.data.suggestions.map((s: Omit<Suggestion, 'category'>) => ({
               ...s,
-              category: category as SuggestionCategory,
-            }));
-          });
-
-          const results = await Promise.allSettled(promises);
-          results.forEach((result) => {
-            if (result.status === 'fulfilled') {
-              allSuggestions.push(...result.value);
-            } else {
-              console.error('Suggestion engine error:', result.reason);
-            }
-          });
+              category: 'grammar' as const,
+            })));
+          }
+          
+          if (!academicResult.error && academicResult.data?.suggestions) {
+            allSuggestions.push(...academicResult.data.suggestions.map((s: Omit<Suggestion, 'category'>) => ({
+              ...s,
+              category: 'academic_voice' as const,
+            })));
+          }
         }
         
-        // Cache the results
         setCachedSuggestions(contentHash, allSuggestions);
         lastAnalyzedContentRef.current = text;
         
         return allSuggestions;
 
       } catch (e: unknown) {
-        console.error('An unexpected error occurred in the suggestion engine:', e);
+        console.error('Suggestion engine error:', e);
         setError('Could not fetch suggestions.');
+        return [];
+      } finally {
+        setIsChecking(false);
+      }
+    },
+    [supabase.functions, getCachedSuggestions, setCachedSuggestions],
+  );
+
+  /**
+   * Dedicated academic voice analysis for on-demand clarity checking.
+   *
+   * @param text The text to analyze for academic voice improvements.
+   * @returns A promise that resolves to an array of academic voice suggestions.
+   */
+  const checkAcademicVoice = useCallback(
+    async (text: string): Promise<Suggestion[]> => {
+      if (!text.trim() || text.length < MIN_CONTENT_LENGTH) {
+        console.log('⏭️ Skipping academic voice analysis: content too short');
+        return [];
+      }
+
+      // Check cache first
+      const contentHash = createContentHash(text + '_academic_voice');
+      const cachedSuggestions = getCachedSuggestions(contentHash);
+      if (cachedSuggestions) {
+        return cachedSuggestions;
+      }
+
+      setIsChecking(true);
+      setError(null);
+
+      try {
+        console.log('🔍 Analyzing academic voice...');
+        
+        const result = await measurePerformance('Academic Voice Check', async () => {
+          const { data, error: invokeError } = await supabase.functions.invoke(
+            'academic-voice',
+            { body: { text } },
+          );
+
+          if (invokeError) {
+            throw new Error(`Error from academic voice check: ${invokeError.message}`);
+          }
+          
+          return data;
+        });
+
+        const academicSuggestions = (result.suggestions || []).map((s: Omit<Suggestion, 'category'>) => ({
+          ...s,
+          category: 'academic_voice' as const,
+        }));
+
+        // Cache the results
+        setCachedSuggestions(contentHash, academicSuggestions);
+        
+        return academicSuggestions;
+
+      } catch (e: unknown) {
+        console.error('An unexpected error occurred in academic voice analysis:', e);
+        setError('Could not fetch academic voice suggestions.');
         return [];
       } finally {
         setIsChecking(false);
@@ -393,6 +493,7 @@ export function useSuggestionEngine() {
     isChecking, 
     error, 
     checkText, 
+    checkAcademicVoice, 
     checkEvidence, 
     analyzeArgument 
   };
