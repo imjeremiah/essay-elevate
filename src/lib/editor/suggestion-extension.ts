@@ -1,6 +1,6 @@
 /**
  * @file This file contains a custom Tiptap mark extension for highlighting
- * grammar and spelling suggestions within the editor.
+ * writing suggestions within the editor.
  */
 import { Mark, mergeAttributes } from '@tiptap/core';
 
@@ -8,10 +8,13 @@ export interface SuggestionOptions {
   HTMLAttributes: Record<string, unknown>;
 }
 
+export type SuggestionCategory = 'grammar' | 'academic_voice';
+
 export interface SuggestionAttributes {
   suggestion?: string;
   explanation?: string;
   original?: string;
+  category?: SuggestionCategory;
 }
 
 declare module '@tiptap/core' {
@@ -53,6 +56,9 @@ export const Suggestion = Mark.create<SuggestionOptions, SuggestionAttributes>({
       original: {
         default: null,
       },
+      category: {
+        default: 'grammar',
+      },
     };
   },
 
@@ -62,22 +68,30 @@ export const Suggestion = Mark.create<SuggestionOptions, SuggestionAttributes>({
         tag: 'span[data-suggestion]',
         getAttrs: node => {
           if (typeof node === 'string') return false;
-          const suggestion = (node as HTMLElement).getAttribute('data-suggestion');
-          const explanation = (node as HTMLElement).getAttribute('data-explanation');
-          const original = (node as HTMLElement).getAttribute('data-original');
-          return { suggestion, explanation, original };
+          const element = node as HTMLElement;
+          return {
+            suggestion: element.getAttribute('data-suggestion'),
+            explanation: element.getAttribute('data-explanation'),
+            original: element.getAttribute('data-original'),
+            category: element.getAttribute('data-category') as SuggestionCategory,
+          };
         },
       },
     ];
   },
 
   renderHTML({ mark, HTMLAttributes }) {
+    // Dynamically set class based on category
+    const categoryClass = `suggestion-${mark.attrs.category || 'grammar'}`;
+    
     return [
       'span',
       mergeAttributes(this.options.HTMLAttributes, HTMLAttributes, {
+        class: categoryClass,
         'data-suggestion': mark.attrs.suggestion,
         'data-explanation': mark.attrs.explanation,
         'data-original': mark.attrs.original,
+        'data-category': mark.attrs.category,
       }),
       0,
     ];
