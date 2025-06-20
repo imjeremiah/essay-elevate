@@ -8,7 +8,7 @@ export interface SuggestionOptions {
   HTMLAttributes: Record<string, unknown>;
 }
 
-export type SuggestionCategory = 'grammar' | 'academic_voice' | 'evidence' | 'argument';
+export type SuggestionCategory = 'grammar' | 'academic_voice' | 'evidence' | 'argument' | 'logical_flow' | 'consistency' | 'claim_support' | 'fallacy';
 
 export interface SuggestionAttributes {
   suggestion?: string;

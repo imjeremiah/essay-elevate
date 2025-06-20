@@ -8,13 +8,21 @@ import { createClient } from '@/lib/supabase/client';
 import { useCallback, useState } from 'react';
 
 // Expanded to include Phase 4 suggestion types
-export type SuggestionCategory = 'grammar' | 'academic_voice' | 'evidence' | 'argument';
+export type SuggestionCategory = 'grammar' | 'academic_voice' | 'evidence' | 'argument' | 'logical_flow' | 'consistency' | 'claim_support' | 'fallacy';
 
 export interface Suggestion {
   original: string;
   suggestion: string;
   explanation: string;
   category: SuggestionCategory;
+  severity?: 'high' | 'medium' | 'low';
+  paragraphContext?: string;
+}
+
+export interface DocumentAnalysis {
+  overallStrength: 'weak' | 'moderate' | 'strong';
+  mainIssues: string[];
+  flowProblems: string[];
 }
 
 /**
@@ -50,7 +58,11 @@ export function useSuggestionEngine() {
         grammar: 'grammar-check',
         academic_voice: 'academic-voice',
         evidence: 'evidence-mentor',
-        argument: 'argument-coach'
+        argument: 'argument-coach',
+        logical_flow: 'argument-coach',
+        consistency: 'argument-coach',
+        claim_support: 'argument-coach',
+        fallacy: 'argument-coach'
       };
 
       try {
@@ -173,11 +185,11 @@ export function useSuggestionEngine() {
    * Performs a full document argument analysis.
    *
    * @param text The complete document text to analyze.
-   * @returns A promise that resolves to an array of argument suggestions.
+   * @returns A promise that resolves to an object containing argument suggestions and document analysis.
    */
   const analyzeArgument = useCallback(
-    async (text: string): Promise<Suggestion[]> => {
-      if (!text.trim()) return [];
+    async (text: string): Promise<{ suggestions: Suggestion[]; documentAnalysis: DocumentAnalysis | null }> => {
+      if (!text.trim()) return { suggestions: [], documentAnalysis: null };
 
       setIsChecking(true);
       setError(null);
@@ -192,15 +204,16 @@ export function useSuggestionEngine() {
           throw new Error(`Error from argument-coach: ${invokeError.message}`);
         }
         
-        // Edge Function already returns suggestions with category field set
+        // Edge Function now returns both suggestions and document analysis
         const argumentSuggestions = (data.suggestions || []) as Suggestion[];
+        const documentAnalysis = data.documentAnalysis as DocumentAnalysis | null;
         
-        return argumentSuggestions;
+        return { suggestions: argumentSuggestions, documentAnalysis };
 
       } catch (e: unknown) {
         console.error('Argument analysis error:', e);
         setError('Could not analyze argument structure.');
-        return [];
+        return { suggestions: [], documentAnalysis: null };
       } finally {
         setIsChecking(false);
       }

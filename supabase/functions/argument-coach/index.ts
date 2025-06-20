@@ -35,19 +35,38 @@ Deno.serve(async req => {
       messages: [
         {
           role: 'system',
-          content: `You are a writing tutor. Analyze the text for logical fallacies, unsupported claims, and weak reasoning. Find the problematic sentences.
+          content: `You are a writing tutor. Analyze the text for logical fallacies, unsupported claims, weak reasoning, and document flow issues. Find problematic sentences and provide categorized feedback.
 
-Identify these issues:
-- **Unsupported Claim**: Statement without evidence
-- **Logical Fallacy**: Flawed reasoning (ad hominem, straw man, etc.)
-- **Weak Reasoning**: Poor connection between claim and evidence
-- **Hasty Generalization**: Conclusion from insufficient evidence
+Identify these issues and assign categories:
+- **claim_support**: Statements without sufficient evidence or support
+- **fallacy**: Logical fallacies (ad hominem, straw man, false dichotomy, etc.)
+- **consistency**: Contradictions or inconsistent positions within the text
+- **logical_flow**: Poor transitions, unclear connections between ideas, or illogical sequence
 
-Return your response as a JSON object with this format: { "suggestions": [...] }
-Each suggestion: { "original": "exact sentence", "suggestion": "", "explanation": "Issue type: brief explanation" }
-IMPORTANT: Always leave "suggestion" as an empty string "".
+For each issue, determine its severity: "high", "medium", or "low"
 
-If no issues: { "suggestions": [] }`,
+Return your response as a JSON object with this format: 
+{
+  "suggestions": [...],
+  "documentAnalysis": {
+    "overallStrength": "weak|moderate|strong",
+    "mainIssues": ["summary of 2-3 most important problems"],
+    "flowProblems": ["issues with logical progression"]
+  }
+}
+
+Each suggestion: { 
+  "original": "exact sentence", 
+  "suggestion": "", 
+  "explanation": "Clear, helpful explanation for high school students",
+  "category": "claim_support|fallacy|consistency|logical_flow",
+  "severity": "high|medium|low",
+  "paragraphContext": "brief context about where this appears"
+}
+
+IMPORTANT: Always leave "suggestion" as an empty string "". Focus on coaching, not rewriting.
+
+If no issues: { "suggestions": [], "documentAnalysis": { "overallStrength": "strong", "mainIssues": [], "flowProblems": [] } }`,
         },
         {
           role: 'user',
@@ -65,15 +84,19 @@ If no issues: { "suggestions": [] }`,
     }
 
     // The response from OpenAI is a JSON string, so we parse it and return.
-    const suggestions = JSON.parse(responseContent);
+    const analysisResult = JSON.parse(responseContent);
 
-    // We need to add the 'category' to each suggestion for the client
-    const typedSuggestions = suggestions.suggestions.map(s => ({
+    // Map the specific categories from the AI to our suggestion system
+    // The AI now provides specific categories, so we use those instead of generic 'argument'
+    const typedSuggestions = analysisResult.suggestions.map(s => ({
       ...s,
-      category: 'argument', // A new category for these suggestions
+      category: s.category || 'argument', // Use AI-provided category or fallback
     }));
 
-    return new Response(JSON.stringify({ suggestions: typedSuggestions }), {
+    return new Response(JSON.stringify({ 
+      suggestions: typedSuggestions,
+      documentAnalysis: analysisResult.documentAnalysis || null
+    }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });

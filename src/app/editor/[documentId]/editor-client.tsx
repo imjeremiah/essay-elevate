@@ -15,7 +15,9 @@ import { useCallback, useEffect, useState, useRef } from 'react';
 import { Suggestion, SuggestionCategory } from '@/lib/editor/suggestion-extension';
 import { useSuggestionEngine } from '@/lib/hooks/use-suggestion-engine';
 import { ThesisSidebar } from '@/components/feature/ThesisSidebar';
-import { Lightbulb, MessageSquare, Zap } from 'lucide-react';
+import { ArgumentSidebar } from '@/components/feature/ArgumentSidebar';
+import { Lightbulb, MessageSquare, Zap, Target, AlertTriangle, ArrowRight, Brain, Loader2 } from 'lucide-react';
+import { DocumentAnalysis } from '@/lib/hooks/use-suggestion-engine';
 import './editor-styles.css';
 
 /**
@@ -93,14 +95,18 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
   const [isThesisSidebarOpen, setThesisSidebarOpen] = useState(false);
   const [selectedTextForThesis, setSelectedTextForThesis] = useState('');
 
-  // State for Phase 4 features
+  // State for Argument Analysis
+  const [isArgumentSidebarOpen, setArgumentSidebarOpen] = useState(false);
   const [isAnalyzingArgument, setIsAnalyzingArgument] = useState(false);
   const [argumentSuggestions, setArgumentSuggestions] = useState<Array<{
     suggestion: string;
     explanation: string;
     original: string;
     category: SuggestionCategory;
+    severity?: 'high' | 'medium' | 'low';
+    paragraphContext?: string;
   }>>([]);
+  const [documentAnalysis, setDocumentAnalysis] = useState<DocumentAnalysis | null>(null);
 
   const { isChecking, error: engineError, checkText, checkEvidence, analyzeArgument } = useSuggestionEngine();
 
@@ -306,15 +312,39 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
     }
   }, [checkEvidence, applySuggestionsToEditor]);
 
+  // Place handleArgumentSuggestionClick after editor is declared
+  const handleArgumentSuggestionClick = useCallback((suggestion: typeof argumentSuggestions[0]) => {
+    if (!editor) return;
+    
+    // Find the text in the editor and highlight it
+    const text = editor.state.doc.textContent;
+    const occurrences = findOccurrences(text, suggestion.original);
+    
+    if (occurrences.length > 0) {
+      const { start, end } = occurrences[0];
+      const from = start + 1;
+      const to = end + 1;
+      
+      // Set selection to the problematic text
+      editor.chain().focus().setTextSelection({ from, to }).run();
+      
+      // Show the suggestion popup
+      setCurrentSuggestion(suggestion);
+      setShowSuggestionPopup(true);
+    }
+  }, [editor]);
+
   const handleAnalyzeArgument = useCallback(async () => {
     if (!editor) return;
     
     setIsAnalyzingArgument(true);
+    setArgumentSidebarOpen(true);
     const text = editor.getText();
     
     try {
-      const suggestions = await analyzeArgument(text);
+      const { suggestions, documentAnalysis } = await analyzeArgument(text);
       setArgumentSuggestions(suggestions);
+      setDocumentAnalysis(documentAnalysis);
       
       if (suggestions.length > 0) {
         applySuggestionsToEditor(editor, suggestions, false);
@@ -408,8 +438,10 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
     const tipTapEnd = targetOccurrence.end + 1;
     
     try {
-      // Only replace text for non-evidence suggestions
-      if (currentSuggestion.category !== 'evidence' && currentSuggestion.category !== 'argument') {
+      // Only replace text for suggestions that have replacement text
+      // Evidence, argument coaching categories don't replace text - they just provide feedback
+      const nonReplacementCategories = ['evidence', 'argument', 'claim_support', 'fallacy', 'consistency', 'logical_flow'];
+      if (!nonReplacementCategories.includes(currentSuggestion.category) && currentSuggestion.suggestion) {
         editor
           .chain()
           .focus()
@@ -451,13 +483,21 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
     academic_voice: 'Academic Voice Suggestion', 
     evidence: 'Evidence Integration',
     argument: 'Argument Analysis',
+    claim_support: 'Claim Support',
+    fallacy: 'Logical Fallacy',
+    consistency: 'Consistency Issue',
+    logical_flow: 'Logical Flow',
   };
 
   const suggestionCategoryIcons: Record<SuggestionCategory, React.ReactNode> = {
     grammar: <MessageSquare className="h-4 w-4" />,
     academic_voice: <Zap className="h-4 w-4" />,
     evidence: <Lightbulb className="h-4 w-4" />,
-    argument: <MessageSquare className="h-4 w-4" />,
+    argument: <Brain className="h-4 w-4" />,
+    claim_support: <Target className="h-4 w-4" />,
+    fallacy: <AlertTriangle className="h-4 w-4" />,
+    consistency: <Zap className="h-4 w-4" />,
+    logical_flow: <ArrowRight className="h-4 w-4" />,
   };
 
   const handleThesisSidebarOpen = () => {
@@ -482,6 +522,12 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
     }
   };
 
+  const handleArgumentSidebarClose = () => {
+    setArgumentSidebarOpen(false);
+    setArgumentSuggestions([]);
+    setDocumentAnalysis(null);
+  };
+
   return (
     <>
       {isThesisSidebarOpen && (
@@ -491,6 +537,15 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
           onReplace={handleReplaceThesis}
         />
       )}
+      
+      <ArgumentSidebar
+        isOpen={isArgumentSidebarOpen}
+        onClose={handleArgumentSidebarClose}
+        isAnalyzing={isAnalyzingArgument}
+        suggestions={argumentSuggestions}
+        documentAnalysis={documentAnalysis}
+        onSuggestionClick={handleArgumentSuggestionClick}
+      />
       <div className="flex flex-col w-full max-w-4xl gap-4 p-8 mx-auto">
         <div className="flex items-center justify-between">
           <input
@@ -511,28 +566,43 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
           </div>
         </div>
 
-        {/* Phase 4: Argument Analysis Button */}
-        <div className="flex gap-2 mb-4">
-          <Button 
-            onClick={handleAnalyzeArgument}
-            disabled={isAnalyzingArgument}
-            variant="outline"
-            size="sm"
-          >
-            {isAnalyzingArgument ? (
-              <>Analyzing Argument...</>
-            ) : (
-              <>
-                <MessageSquare className="mr-2 h-4 w-4" />
-                Analyze Argument
-              </>
-            )}
-          </Button>
-          {argumentSuggestions.length > 0 && (
-            <div className="text-sm text-muted-foreground flex items-center">
-              Found {argumentSuggestions.length} argument issue{argumentSuggestions.length !== 1 ? 's' : ''}
+        {/* Argument Analysis Controls */}
+        <div className="flex items-center justify-between mb-4 p-4 rounded-lg bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200">
+          <div className="flex items-center gap-3">
+            <Brain className="h-5 w-5 text-purple-600" />
+            <div>
+              <h3 className="font-semibold text-purple-900">Argument Analysis</h3>
+              <p className="text-sm text-purple-700">Get comprehensive feedback on your argument structure</p>
             </div>
-          )}
+          </div>
+          
+          <div className="flex items-center gap-3">
+            {argumentSuggestions.length > 0 && (
+              <div className="text-sm text-purple-700 flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4" />
+                {argumentSuggestions.length} issue{argumentSuggestions.length !== 1 ? 's' : ''} found
+              </div>
+            )}
+            <Button 
+              onClick={handleAnalyzeArgument}
+              disabled={isAnalyzingArgument}
+              variant="default"
+              size="sm"
+              className="bg-purple-600 hover:bg-purple-700"
+            >
+              {isAnalyzingArgument ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Analyzing...
+                </>
+              ) : (
+                <>
+                  <Brain className="mr-2 h-4 w-4" />
+                  Analyze Argument
+                </>
+              )}
+            </Button>
+          </div>
         </div>
 
         {editor && (
@@ -590,7 +660,7 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
               >
                 Got it!
               </Button>
-            ) : (
+            ) : currentSuggestion.suggestion ? (
               <Button
                 onClick={acceptSuggestion}
                 size="sm"
@@ -598,6 +668,18 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
                 disabled={isAcceptingSuggestion}
               >
                 {isAcceptingSuggestion ? "Accepting..." : `Accept: "${currentSuggestion.suggestion}"`}
+              </Button>
+            ) : (
+              <Button
+                onClick={() => {
+                  setShowSuggestionPopup(false);
+                  setCurrentSuggestion(null);
+                }}
+                size="sm"
+                className="w-full"
+                variant="outline"
+              >
+                Got it!
               </Button>
             )}
           </div>

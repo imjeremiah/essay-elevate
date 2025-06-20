@@ -51,6 +51,42 @@
   @apply bg-purple-300/70;
 }
 
+/* Claim Support suggestions - orange underline */
+.suggestion-claim_support {
+  @apply bg-orange-200/50 border-b-2 border-orange-500;
+}
+
+.suggestion-claim_support:hover {
+  @apply bg-orange-300/70;
+}
+
+/* Logical Fallacy suggestions - red underline */
+.suggestion-fallacy {
+  @apply bg-red-200/50 border-b-2 border-red-600;
+}
+
+.suggestion-fallacy:hover {
+  @apply bg-red-300/70;
+}
+
+/* Consistency suggestions - yellow underline */
+.suggestion-consistency {
+  @apply bg-yellow-200/50 border-b-2 border-yellow-500;
+}
+
+.suggestion-consistency:hover {
+  @apply bg-yellow-300/70;
+}
+
+/* Logical Flow suggestions - blue underline */
+.suggestion-logical_flow {
+  @apply bg-blue-200/50 border-b-2 border-blue-500;
+}
+
+.suggestion-logical_flow:hover {
+  @apply bg-blue-300/70;
+}
+
 /* You can add more styles for the ProseMirror editor container if needed */
 .ProseMirror {
   min-height: 400px;
