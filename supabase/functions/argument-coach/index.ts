@@ -31,45 +31,23 @@ Deno.serve(async req => {
     }
 
     const completion = await openAI.chat.completions.create({
-      model: 'gpt-4o', // Using a more powerful model for this complex task
+      model: 'gpt-4o-mini', // Faster model for sub-2-second performance
       messages: [
         {
           role: 'system',
-          content: `You are a university-level writing tutor. Your goal is to analyze a student's essay for argumentation and reasoning. Read the entire text and identify specific sentences that contain logical fallacies, unsupported claims, or weak reasoning.
+          content: `You are a writing tutor. Analyze the text for logical fallacies, unsupported claims, and weak reasoning. Find the problematic sentences.
 
-You must identify and explain the following issues:
-- **Unsupported Claim:** A statement is made without any evidence or reasoning to back it up.
-- **Hasty Generalization:** A conclusion is drawn from insufficient or biased evidence.
-- **Weak Reasoning:** The connection between a claim and its evidence is unclear or unconvincing.
-- **Logical Fallacy:** A flaw in reasoning (e.g., straw man, ad hominem, etc. - but explain it simply).
+Identify these issues:
+- **Unsupported Claim**: Statement without evidence
+- **Logical Fallacy**: Flawed reasoning (ad hominem, straw man, etc.)
+- **Weak Reasoning**: Poor connection between claim and evidence
+- **Hasty Generalization**: Conclusion from insufficient evidence
 
-For each issue you find, you must pinpoint the exact sentence where it occurs.
+Return your response as a JSON object with this format: { "suggestions": [...] }
+Each suggestion: { "original": "exact sentence", "suggestion": "", "explanation": "Issue type: brief explanation" }
+IMPORTANT: Always leave "suggestion" as an empty string "".
 
-Your response MUST be in a valid JSON object format: { "suggestions": [...] }
-Each object in the "suggestions" array must have three properties:
-1.  "original": The exact, complete sentence from the text that has an issue.
-2.  "suggestion": An empty string. Do not suggest a revision.
-3.  "explanation": A concise, constructive explanation of the issue. Start by naming the issue (e.g., "Unsupported Claim:").
-
-Example:
-Text: "Everyone knows that Shakespeare is the best writer ever. His plays are still performed, which proves it."
-Response:
-{
-  "suggestions": [
-    {
-      "original": "Everyone knows that Shakespeare is the best writer ever.",
-      "suggestion": "",
-      "explanation": "Hasty Generalization: This is a broad claim based on an appeal to common knowledge, which isn't sufficient evidence in academic writing."
-    },
-    {
-      "original": "His plays are still performed, which proves it.",
-      "suggestion": "",
-      "explanation": "Weak Reasoning: While the popularity of his plays is a valid point, it doesn't definitively 'prove' he is the 'best ever.' This connection could be stronger."
-    }
-  ]
-}
-
-If the text has no argumentation issues, return an empty array: { "suggestions": [] }`,
+If no issues: { "suggestions": [] }`,
         },
         {
           role: 'user',
@@ -77,6 +55,8 @@ If the text has no argumentation issues, return an empty array: { "suggestions":
         },
       ],
       response_format: { type: 'json_object' },
+      temperature: 0,
+      max_tokens: 800,
     });
 
     const responseContent = completion.choices[0].message.content;
@@ -87,10 +67,10 @@ If the text has no argumentation issues, return an empty array: { "suggestions":
     // The response from OpenAI is a JSON string, so we parse it and return.
     const suggestions = JSON.parse(responseContent);
 
-    // We need to add the 'type' to each suggestion for the client
+    // We need to add the 'category' to each suggestion for the client
     const typedSuggestions = suggestions.suggestions.map(s => ({
       ...s,
-      type: 'argument', // A new type for these suggestions
+      category: 'argument', // A new category for these suggestions
     }));
 
     return new Response(JSON.stringify({ suggestions: typedSuggestions }), {

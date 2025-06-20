@@ -15,6 +15,7 @@ import { useCallback, useEffect, useState, useRef } from 'react';
 import { Suggestion, SuggestionCategory } from '@/lib/editor/suggestion-extension';
 import { useSuggestionEngine } from '@/lib/hooks/use-suggestion-engine';
 import { ThesisSidebar } from '@/components/feature/ThesisSidebar';
+import { Lightbulb, MessageSquare, Zap } from 'lucide-react';
 import './editor-styles.css';
 
 /**
@@ -60,7 +61,7 @@ interface EditorClientProps {
 }
 
 interface ActiveSuggestion {
-  suggestion: string;
+  suggestion: string; // Can be empty for coaching suggestions (evidence/argument)
   explanation: string;
   original: string;
   category: SuggestionCategory;
@@ -77,6 +78,7 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
   const debouncedTitle = useDebounce(title, 500);
 
   const suggestionCheckTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const evidenceCheckTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isApplyingSuggestionsRef = useRef(false);
 
   const [isSaving, setIsSaving] = useState(false);
@@ -91,7 +93,116 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
   const [isThesisSidebarOpen, setThesisSidebarOpen] = useState(false);
   const [selectedTextForThesis, setSelectedTextForThesis] = useState('');
 
-  const { isChecking, error: engineError, checkText } = useSuggestionEngine();
+  // State for Phase 4 features
+  const [isAnalyzingArgument, setIsAnalyzingArgument] = useState(false);
+  const [argumentSuggestions, setArgumentSuggestions] = useState<Array<{
+    suggestion: string;
+    explanation: string;
+    original: string;
+    category: SuggestionCategory;
+  }>>([]);
+
+  const { isChecking, error: engineError, checkText, checkEvidence, analyzeArgument } = useSuggestionEngine();
+
+  const applySuggestionsToEditor = useCallback((editorInstance: ReturnType<typeof useEditor>, suggestions: Array<{
+    suggestion: string;
+    explanation: string;
+    original: string;
+    category: SuggestionCategory;
+  }>, clearFirst = true) => {
+    if (!editorInstance) return;
+    
+    isApplyingSuggestionsRef.current = true;
+    
+    const { tr } = editorInstance.state;
+    const docSize = editorInstance.state.doc.content.size;
+    const docText = editorInstance.state.doc.textContent;
+    
+    // Collect existing evidence and argument suggestions before clearing
+    const existingEvidenceAndArgument: Array<{
+      suggestion: string;
+      explanation: string;
+      original: string;
+      category: SuggestionCategory;
+      from: number;
+      to: number;
+    }> = [];
+    
+    if (clearFirst) {
+      const { state } = editorInstance;
+      state.doc.descendants((node, pos) => {
+        node.marks.forEach((mark) => {
+          if (mark.type.name === 'suggestion') {
+            const category = mark.attrs.category;
+            if (category === 'evidence' || category === 'argument') {
+              existingEvidenceAndArgument.push({
+                suggestion: mark.attrs.suggestion || '',
+                explanation: mark.attrs.explanation,
+                original: mark.attrs.original,
+                category: mark.attrs.category,
+                from: pos,
+                to: pos + node.nodeSize
+              });
+            }
+          }
+        });
+        return true;
+      });
+      
+      // Clear all suggestion marks
+      tr.removeMark(0, docSize, editorInstance.schema.marks.suggestion);
+    }
+    
+    // Apply new suggestions
+    suggestions.forEach((s) => {
+      // Evidence and argument suggestions have empty suggestion fields but are still valid
+      const isCoachingSuggestion = s.category === 'evidence' || s.category === 'argument';
+      const hasRequiredFields = s.original && s.explanation && (s.suggestion || isCoachingSuggestion);
+      
+      if (hasRequiredFields) {
+        const occurrences = findOccurrences(docText, s.original);
+        
+        if (occurrences.length > 0) {
+          const { start, end } = occurrences[0];
+          const from = start + 1;
+          const to = end + 1;
+
+          if (from > 0 && to <= docSize + 1 && from < to) {
+            try {
+              tr.addMark(from, to, editorInstance.schema.marks.suggestion.create({
+                suggestion: s.suggestion,
+                original: s.original,
+                explanation: s.explanation,
+                category: s.category,
+              }));
+            } catch (markError) {
+              console.warn('Failed to apply mark:', { s, markError });
+            }
+          }
+        }
+      }
+    });
+    
+    // Re-apply existing evidence and argument suggestions
+    existingEvidenceAndArgument.forEach((s) => {
+      try {
+        tr.addMark(s.from, s.to, editorInstance.schema.marks.suggestion.create({
+          suggestion: s.suggestion,
+          original: s.original,
+          explanation: s.explanation,
+          category: s.category,
+        }));
+      } catch (markError) {
+        console.warn('Failed to re-apply existing mark:', { s, markError });
+      }
+    });
+    
+    editorInstance.view.dispatch(tr);
+    
+    setTimeout(() => {
+      isApplyingSuggestionsRef.current = false;
+    }, 100);
+  }, []);
 
   const editor = useEditor({
     extensions: [
@@ -106,14 +217,23 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
     immediatelyRender: false,
     onSelectionUpdate: ({ editor: editorInstance }) => {
       const attrs = editorInstance.getAttributes('suggestion');
-      if (attrs && attrs.suggestion) {
-        setCurrentSuggestion({
-          suggestion: attrs.suggestion,
-          explanation: attrs.explanation,
-          original: attrs.original,
-          category: attrs.category,
-        });
-        setShowSuggestionPopup(true);
+      if (attrs && attrs.original && attrs.explanation) {
+        // Evidence and argument suggestions have empty suggestion fields but are still valid
+        const isCoachingSuggestion = attrs.category === 'evidence' || attrs.category === 'argument';
+        const hasValidContent = attrs.suggestion || isCoachingSuggestion;
+        
+        if (hasValidContent) {
+          setCurrentSuggestion({
+            suggestion: attrs.suggestion || '',
+            explanation: attrs.explanation,
+            original: attrs.original,
+            category: attrs.category,
+          });
+          setShowSuggestionPopup(true);
+        } else {
+          setShowSuggestionPopup(false);
+          setCurrentSuggestion(null);
+        }
       } else {
         setShowSuggestionPopup(false);
         setCurrentSuggestion(null);
@@ -122,21 +242,33 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
     onUpdate: ({ editor: editorInstance }) => {
       if (isApplyingSuggestionsRef.current) return;
       
+      // Clear existing timeouts
       if (suggestionCheckTimeoutRef.current) {
         clearTimeout(suggestionCheckTimeoutRef.current);
       }
+      if (evidenceCheckTimeoutRef.current) {
+        clearTimeout(evidenceCheckTimeoutRef.current);
+      }
+
+      // Schedule real-time suggestion checks (grammar + academic voice)
       suggestionCheckTimeoutRef.current = setTimeout(() => {
         runSuggestionCheck(editorInstance);
       }, 2000);
+
+      // Schedule evidence checks (quote dropping detection)
+      evidenceCheckTimeoutRef.current = setTimeout(() => {
+        runEvidenceCheck(editorInstance);
+      }, 3000); // Slightly delayed to avoid overlapping with main suggestions
     },
     onCreate: ({ editor: editorInstance }) => {
       setTimeout(() => {
         runSuggestionCheck(editorInstance);
+        runEvidenceCheck(editorInstance);
       }, 1000);
     },
   });
 
-  const runSuggestionCheck = useCallback(async (editorInstance: any) => {
+  const runSuggestionCheck = useCallback(async (editorInstance: ReturnType<typeof useEditor>) => {
     if (!editorInstance) return;
 
     const text = editorInstance.getText();
@@ -146,52 +278,53 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
         const docSize = editorInstance.state.doc.content.size;
         tr.removeMark(0, docSize, editorInstance.schema.marks.suggestion);
         editorInstance.view.dispatch(tr);
-      } catch (e) { /* Ignore errors on clear */ }
+      } catch (error) { 
+        console.error('Error clearing suggestions:', error);
+      }
       return;
     }
 
+    // Get real-time suggestions (grammar + academic voice)
     const allSuggestions = await checkText(text);
 
     if (allSuggestions.length > 0) {
-      isApplyingSuggestionsRef.current = true;
-      
-      const { tr } = editorInstance.state;
-      const docSize = editorInstance.state.doc.content.size;
-      const docText = editorInstance.state.doc.textContent;
-      
-      tr.removeMark(0, docSize, editorInstance.schema.marks.suggestion);
-      
-      allSuggestions.forEach((s) => {
-        if (s.suggestion && s.original && s.explanation) {
-          const occurrences = findOccurrences(docText, s.original);
-          if (occurrences.length > 0) {
-            const { start, end } = occurrences[0];
-            const from = start + 1;
-            const to = end + 1;
-
-            if (from > 0 && to <= docSize + 1 && from < to) {
-              try {
-                tr.addMark(from, to, editorInstance.schema.marks.suggestion.create({
-                  suggestion: s.suggestion,
-                  original: s.original,
-                  explanation: s.explanation,
-                  category: s.category,
-                }));
-              } catch (markError) {
-                console.warn('Failed to apply mark:', { s, markError });
-              }
-            }
-          }
-        }
-      });
-      
-      editorInstance.view.dispatch(tr);
-      
-      setTimeout(() => {
-        isApplyingSuggestionsRef.current = false;
-      }, 100);
+      applySuggestionsToEditor(editorInstance, allSuggestions);
     }
-  }, [checkText]);
+  }, [checkText, applySuggestionsToEditor]);
+
+  const runEvidenceCheck = useCallback(async (editorInstance: ReturnType<typeof useEditor>) => {
+    if (!editorInstance) return;
+
+    const text = editorInstance.getText();
+    if (!text.trim()) return;
+
+    // Get evidence suggestions (quote dropping detection)
+    const evidenceSuggestions = await checkEvidence(text);
+
+    if (evidenceSuggestions.length > 0) {
+      applySuggestionsToEditor(editorInstance, evidenceSuggestions, false);
+    }
+  }, [checkEvidence, applySuggestionsToEditor]);
+
+  const handleAnalyzeArgument = useCallback(async () => {
+    if (!editor) return;
+    
+    setIsAnalyzingArgument(true);
+    const text = editor.getText();
+    
+    try {
+      const suggestions = await analyzeArgument(text);
+      setArgumentSuggestions(suggestions);
+      
+      if (suggestions.length > 0) {
+        applySuggestionsToEditor(editor, suggestions, false);
+      }
+    } catch (error) {
+      console.error('Error analyzing argument:', error);
+    } finally {
+      setIsAnalyzingArgument(false);
+    }
+  }, [editor, analyzeArgument, applySuggestionsToEditor]);
 
   const saveDocument = useCallback(async () => {
     if (!editor) return;
@@ -224,18 +357,21 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
     if (debouncedEditorState && editor) {
       saveDocument();
     }
-  }, [debouncedEditorState, saveDocument]);
+  }, [debouncedEditorState, saveDocument, editor]);
 
   useEffect(() => {
     if (debouncedTitle !== initialDocument.title && editor) {
       saveDocument();
     }
-  }, [debouncedTitle, saveDocument, initialDocument.title]);
+  }, [debouncedTitle, saveDocument, initialDocument.title, editor]);
 
   useEffect(() => {
     return () => {
       if (suggestionCheckTimeoutRef.current) {
         clearTimeout(suggestionCheckTimeoutRef.current);
+      }
+      if (evidenceCheckTimeoutRef.current) {
+        clearTimeout(evidenceCheckTimeoutRef.current);
       }
     };
   }, []);
@@ -272,13 +408,16 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
     const tipTapEnd = targetOccurrence.end + 1;
     
     try {
-      editor
-        .chain()
-        .focus()
-        .setTextSelection({ from: tipTapStart, to: tipTapEnd })
-        .deleteSelection()
-        .insertContent(suggestionToAccept.suggestion)
-        .run();
+      // Only replace text for non-evidence suggestions
+      if (currentSuggestion.category !== 'evidence' && currentSuggestion.category !== 'argument') {
+        editor
+          .chain()
+          .focus()
+          .setTextSelection({ from: tipTapStart, to: tipTapEnd })
+          .deleteSelection()
+          .insertContent(suggestionToAccept.suggestion)
+          .run();
+      }
       
       const { tr } = editor.state;
       const docSize = editor.state.doc.content.size;
@@ -309,7 +448,16 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
 
   const suggestionCategoryTitles: Record<SuggestionCategory, string> = {
     grammar: 'Grammar Suggestion',
-    academic_voice: 'Academic Voice Suggestion',
+    academic_voice: 'Academic Voice Suggestion', 
+    evidence: 'Evidence Integration',
+    argument: 'Argument Analysis',
+  };
+
+  const suggestionCategoryIcons: Record<SuggestionCategory, React.ReactNode> = {
+    grammar: <MessageSquare className="h-4 w-4" />,
+    academic_voice: <Zap className="h-4 w-4" />,
+    evidence: <Lightbulb className="h-4 w-4" />,
+    argument: <MessageSquare className="h-4 w-4" />,
   };
 
   const handleThesisSidebarOpen = () => {
@@ -363,6 +511,30 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
           </div>
         </div>
 
+        {/* Phase 4: Argument Analysis Button */}
+        <div className="flex gap-2 mb-4">
+          <Button 
+            onClick={handleAnalyzeArgument}
+            disabled={isAnalyzingArgument}
+            variant="outline"
+            size="sm"
+          >
+            {isAnalyzingArgument ? (
+              <>Analyzing Argument...</>
+            ) : (
+              <>
+                <MessageSquare className="mr-2 h-4 w-4" />
+                Analyze Argument
+              </>
+            )}
+          </Button>
+          {argumentSuggestions.length > 0 && (
+            <div className="text-sm text-muted-foreground flex items-center">
+              Found {argumentSuggestions.length} argument issue{argumentSuggestions.length !== 1 ? 's' : ''}
+            </div>
+          )}
+        </div>
+
         {editor && (
           <BubbleMenu
             editor={editor}
@@ -384,9 +556,12 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
         {showSuggestionPopup && currentSuggestion && (
           <div className="fixed bottom-4 right-4 p-4 bg-white border border-gray-200 rounded-lg shadow-lg flex flex-col gap-3 max-w-sm z-50">
             <div className="flex justify-between items-start">
-              <h4 className="font-medium text-sm text-gray-900">
-                {suggestionCategoryTitles[currentSuggestion.category]}
-              </h4>
+              <div className="flex items-center gap-2">
+                {suggestionCategoryIcons[currentSuggestion.category]}
+                <h4 className="font-medium text-sm text-gray-900">
+                  {suggestionCategoryTitles[currentSuggestion.category]}
+                </h4>
+              </div>
               <button
                 onClick={() => {
                   setShowSuggestionPopup(false);
@@ -400,17 +575,31 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
             <div className="text-sm text-gray-700">
               <p className="mb-2">{currentSuggestion.explanation}</p>
               <p className="mb-3">
-                <span className="font-medium">Original:</span> "{currentSuggestion.original}"
+                <span className="font-medium">Original:</span> &quot;{currentSuggestion.original}&quot;
               </p>
             </div>
-            <Button
-              onClick={acceptSuggestion}
-              size="sm"
-              className="w-full"
-              disabled={isAcceptingSuggestion}
-            >
-              {isAcceptingSuggestion ? "Accepting..." : `Accept: "${currentSuggestion.suggestion}"`}
-            </Button>
+            {currentSuggestion.category === 'evidence' || currentSuggestion.category === 'argument' ? (
+              <Button
+                onClick={() => {
+                  setShowSuggestionPopup(false);
+                  setCurrentSuggestion(null);
+                }}
+                size="sm"
+                className="w-full"
+                variant="outline"
+              >
+                Got it!
+              </Button>
+            ) : (
+              <Button
+                onClick={acceptSuggestion}
+                size="sm"
+                className="w-full"
+                disabled={isAcceptingSuggestion}
+              >
+                {isAcceptingSuggestion ? "Accepting..." : `Accept: "${currentSuggestion.suggestion}"`}
+              </Button>
+            )}
           </div>
         )}
 

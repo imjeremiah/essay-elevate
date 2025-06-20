@@ -68,7 +68,7 @@ export function ThesisSidebar({ selectedText, onClose, onReplace }: ThesisSideba
 
       <div className="p-4 rounded-lg bg-primary/5 border border-primary/20 mb-6">
         <p className="font-semibold text-foreground mb-2">Selected Thesis:</p>
-        <p className="italic text-foreground/80">"{selectedText}"</p>
+        <p className="italic text-foreground/80">&quot;{selectedText}&quot;</p>
       </div>
 
       {!analysis && !isLoading && !error && (

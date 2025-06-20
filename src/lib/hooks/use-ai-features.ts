@@ -6,7 +6,7 @@
 import { useCallback, useState } from 'react';
 import { type Editor } from '@tiptap/react';
 import { type SupabaseClient } from '@supabase/supabase-js';
-import { type WritingSuggestion } from '@/lib/types';
+import { type Suggestion } from '@/lib/hooks/use-suggestion-engine';
 
 /**
  * A generic function to invoke a Supabase edge function.
@@ -19,7 +19,7 @@ async function invokeFunction(
   functionName: string,
   body: Record<string, unknown>,
   supabase: SupabaseClient
-): Promise<WritingSuggestion[]> {
+): Promise<Suggestion[]> {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error('Not authenticated');
 
@@ -40,7 +40,7 @@ async function invokeFunction(
 
   const { suggestions } = await response.json();
   if (suggestions && Array.isArray(suggestions)) {
-    return suggestions.map((s: Omit<WritingSuggestion, 'id'>) => ({
+    return suggestions.map((s: Omit<Suggestion, 'id'>) => ({
       ...s,
       id: crypto.randomUUID(),
     }));
@@ -59,18 +59,18 @@ export function useEvidenceMentor(editor: Editor | null, supabase: SupabaseClien
   const [isChecking, setIsChecking] = useState(false);
   const [analyzedQuotes, setAnalyzedQuotes] = useState<Set<string>>(new Set());
 
-  const checkEvidenceIntegration = useCallback(async (): Promise<WritingSuggestion[]> => {
+  const checkEvidenceIntegration = useCallback(async (): Promise<Suggestion[]> => {
     if (!editor || isChecking) return [];
 
     const text = editor.getText();
     if (!text.trim()) return [];
 
     setIsChecking(true);
-    let newSuggestions: WritingSuggestion[] = [];
+    let newSuggestions: Suggestion[] = [];
 
     const quoteRegex = /"([^"]+)"/g;
     let match;
-    const promises: Promise<WritingSuggestion[]>[] = [];
+    const promises: Promise<Suggestion[]>[] = [];
 
     while ((match = quoteRegex.exec(text)) !== null) {
       const quoteContent = match[1];
@@ -114,11 +114,11 @@ export function useEvidenceMentor(editor: Editor | null, supabase: SupabaseClien
 export function useArgumentCoach(editor: Editor | null, supabase: SupabaseClient) {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
-  const analyzeArgument = useCallback(async (): Promise<WritingSuggestion[]> => {
+  const analyzeArgument = useCallback(async (): Promise<Suggestion[]> => {
     if (!editor) return [];
     
     setIsAnalyzing(true);
-    let newSuggestions: WritingSuggestion[] = [];
+    let newSuggestions: Suggestion[] = [];
     
     try {
       const text = editor.getText();

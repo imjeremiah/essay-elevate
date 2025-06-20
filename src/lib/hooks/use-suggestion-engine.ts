@@ -1,14 +1,14 @@
 /**
  * @file This hook centralizes the logic for fetching and managing all types of
- * writing suggestions (grammar, academic voice, etc.) from different AI services.
+ * writing suggestions (grammar, academic voice, evidence, argument) from different AI services.
  */
 'use client';
 
 import { createClient } from '@/lib/supabase/client';
 import { useCallback, useState } from 'react';
 
-// This will be expanded as we add more suggestion types
-export type SuggestionCategory = 'grammar' | 'academic_voice';
+// Expanded to include Phase 4 suggestion types
+export type SuggestionCategory = 'grammar' | 'academic_voice' | 'evidence' | 'argument';
 
 export interface Suggestion {
   original: string;
@@ -28,10 +28,10 @@ export function useSuggestionEngine() {
   const [error, setError] = useState<string | null>(null);
 
   /**
-   * Fetches suggestions from all registered AI services for the given text.
+   * Fetches suggestions from grammar and academic voice services for real-time checking.
    *
    * @param text The text to analyze.
-   * @returns A promise that resolves to an array of all suggestions.
+   * @returns A promise that resolves to an array of real-time suggestions.
    */
   const checkText = useCallback(
     async (text: string): Promise<Suggestion[]> => {
@@ -42,12 +42,15 @@ export function useSuggestionEngine() {
       setIsChecking(true);
       setError(null);
 
+      // Only real-time suggestions (grammar and academic voice)
       const functionsToCall: SuggestionCategory[] = ['grammar', 'academic_voice'];
       
       // Map category names to actual function names
       const functionNameMap: Record<SuggestionCategory, string> = {
         grammar: 'grammar-check',
-        academic_voice: 'academic-voice'
+        academic_voice: 'academic-voice',
+        evidence: 'evidence-mentor',
+        argument: 'argument-coach'
       };
 
       try {
@@ -83,7 +86,7 @@ export function useSuggestionEngine() {
         
         return allSuggestions;
 
-      } catch (e: any) {
+      } catch (e: unknown) {
         console.error('An unexpected error occurred in the suggestion engine:', e);
         setError('Could not fetch suggestions.');
         return [];
@@ -94,5 +97,122 @@ export function useSuggestionEngine() {
     [supabase.functions],
   );
 
-  return { isChecking, error, checkText };
+  /**
+   * Checks for evidence integration issues (quote dropping) in the text.
+   *
+   * @param text The full text to analyze for quotes.
+   * @returns A promise that resolves to an array of evidence suggestions.
+   */
+  const checkEvidence = useCallback(
+    async (text: string): Promise<Suggestion[]> => {
+      if (!text.trim()) return [];
+
+      setIsChecking(true);
+      setError(null);
+
+      try {
+        // Find all quotes in the text
+        const quoteRegex = /"([^"]+)"/g;
+        const matches = Array.from(text.matchAll(quoteRegex));
+        
+        if (matches.length === 0) {
+          return [];
+        }
+
+        const promises = matches.map(async (match) => {
+          const quote = match[0]; // Full quoted text including quotes
+          const quoteStartIndex = match.index!;
+          
+          // Get surrounding context (200 chars before and after)
+          const contextBefore = text.substring(Math.max(0, quoteStartIndex - 200), quoteStartIndex);
+          const contextAfter = text.substring(
+            quoteStartIndex + quote.length, 
+            quoteStartIndex + quote.length + 200
+          );
+          
+          const surroundingText = `${contextBefore}${quote}${contextAfter}`;
+
+          const { data, error: invokeError } = await supabase.functions.invoke(
+            'evidence-mentor',
+            { body: { quote, surroundingText } },
+          );
+
+          if (invokeError) {
+            console.error('Evidence mentor error:', invokeError);
+            return [];
+          }
+          
+          // Edge Function already returns suggestions with category field set
+          const suggestions = (data.suggestions || []) as Suggestion[];
+          return suggestions;
+        });
+
+        const results = await Promise.allSettled(promises);
+        const evidenceSuggestions: Suggestion[] = [];
+
+        results.forEach((result) => {
+          if (result.status === 'fulfilled') {
+            evidenceSuggestions.push(...result.value);
+          }
+        });
+        
+        return evidenceSuggestions;
+
+      } catch (e: unknown) {
+        console.error('Evidence check error:', e);
+        setError('Could not check evidence integration.');
+        return [];
+      } finally {
+        setIsChecking(false);
+      }
+    },
+    [supabase.functions],
+  );
+
+  /**
+   * Performs a full document argument analysis.
+   *
+   * @param text The complete document text to analyze.
+   * @returns A promise that resolves to an array of argument suggestions.
+   */
+  const analyzeArgument = useCallback(
+    async (text: string): Promise<Suggestion[]> => {
+      if (!text.trim()) return [];
+
+      setIsChecking(true);
+      setError(null);
+
+      try {
+        const { data, error: invokeError } = await supabase.functions.invoke(
+          'argument-coach',
+          { body: { text } },
+        );
+
+        if (invokeError) {
+          throw new Error(`Error from argument-coach: ${invokeError.message}`);
+        }
+        
+        // Edge Function already returns suggestions with category field set
+        const argumentSuggestions = (data.suggestions || []) as Suggestion[];
+        
+        return argumentSuggestions;
+
+      } catch (e: unknown) {
+        console.error('Argument analysis error:', e);
+        setError('Could not analyze argument structure.');
+        return [];
+      } finally {
+        setIsChecking(false);
+      }
+    },
+    [supabase.functions],
+  );
+
+  return { 
+    isChecking, 
+    error, 
+    checkText, 
+    checkEvidence, 
+    analyzeArgument 
+  };
 } 

@@ -15,12 +15,40 @@
   box-shadow: 0 1px 3px rgba(220, 38, 38, 0.3);
 }
 
+/* Grammar suggestions - blue underline */
 .suggestion-grammar {
-  @apply bg-blue-200/50;
+  @apply bg-blue-200/50 border-b-2 border-blue-500;
 }
 
+.suggestion-grammar:hover {
+  @apply bg-blue-300/70;
+}
+
+/* Academic voice suggestions - amber underline */
 .suggestion-academic_voice {
-  @apply bg-amber-200/50;
+  @apply bg-amber-200/50 border-b-2 border-amber-500;
+}
+
+.suggestion-academic_voice:hover {
+  @apply bg-amber-300/70;
+}
+
+/* Evidence suggestions - green underline for quote-dropping issues */
+.suggestion-evidence {
+  @apply bg-green-200/50 border-b-2 border-green-500;
+}
+
+.suggestion-evidence:hover {
+  @apply bg-green-300/70;
+}
+
+/* Argument suggestions - purple underline for logical issues */
+.suggestion-argument {
+  @apply bg-purple-200/50 border-b-2 border-purple-500;
+}
+
+.suggestion-argument:hover {
+  @apply bg-purple-300/70;
 }
 
 /* You can add more styles for the ProseMirror editor container if needed */

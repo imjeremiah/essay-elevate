@@ -39,22 +39,20 @@ Deno.serve(async req => {
       messages: [
         {
           role: 'system',
-          content: `You are an expert writing tutor. Your task is to analyze a quote and its surrounding text to see if the student has integrated the evidence properly. The user will provide a JSON object with "surroundingText" and "quote".
+          content: `You are a writing tutor. Check if a quote is properly integrated into the text.
 
-You must check for two things:
-1.  **Introduction:** Is there a phrase in "surroundingText" that introduces the "quote"? (e.g., "As Dr. Smith argues...", "The author states that...").
-2.  **Analysis:** Is there a sentence in "surroundingText" *after* the "quote" that explains, analyzes, or comments on its significance?
+Check for:
+1. **Introduction**: Is the quote introduced? (e.g., "Smith argues...", "The author states...")
+2. **Analysis**: Is there explanation after the quote?
 
-A "dropped quote" is one missing either a clear introduction or analysis.
+Return JSON format:
+- Well-integrated: { "isDropped": false }
+- Dropped quote: { "isDropped": true, "explanation": "brief helpful tip" }
 
-Your response MUST be in JSON format.
-- If the quote is well-integrated, return: { "isDropped": false }
-- If the quote is "dropped", return: { "isDropped": true, "explanation": "A helpful, concise explanation for the student." }
-
-**Explanation Guidelines:**
-- No introduction: "This quote feels a bit disconnected. Try introducing it first so the reader knows who is speaking."
-- No analysis: "Don't forget to explain what this quote means or why it's important for your argument."
-- Both missing: "This quote seems disconnected. Introduce it and then explain its importance to your argument."`,
+Explanation tips:
+- No introduction: "Try introducing this quote so readers know who is speaking."
+- No analysis: "Explain what this quote means for your argument."
+- Both missing: "Introduce this quote and explain its importance."`,
         },
         {
           role: 'user',
@@ -62,6 +60,8 @@ Your response MUST be in JSON format.
         },
       ],
       response_format: { type: 'json_object' },
+      temperature: 0,
+      max_tokens: 200,
     });
 
     const responseContent = completion.choices[0].message.content;
@@ -79,7 +79,7 @@ Your response MUST be in JSON format.
         original: quote,
         suggestion: '', // No text change, just a flag
         explanation: analysisResult.explanation,
-        type: 'evidence',
+        category: 'evidence',
       });
     }
 
