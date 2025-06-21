@@ -51,40 +51,40 @@
   @apply bg-purple-300/70;
 }
 
-/* Claim Support suggestions - orange underline */
+/* Claim Support suggestions - purple underline (part of argument analysis) */
 .suggestion-claim_support {
-  @apply bg-orange-200/50 border-b-2 border-orange-500;
+  @apply bg-purple-200/50 border-b-2 border-purple-500;
 }
 
 .suggestion-claim_support:hover {
-  @apply bg-orange-300/70;
+  @apply bg-purple-300/70;
 }
 
-/* Logical Fallacy suggestions - red underline */
+/* Logical Fallacy suggestions - purple underline (part of argument analysis) */
 .suggestion-fallacy {
-  @apply bg-red-200/50 border-b-2 border-red-600;
+  @apply bg-purple-200/50 border-b-2 border-purple-500;
 }
 
 .suggestion-fallacy:hover {
-  @apply bg-red-300/70;
+  @apply bg-purple-300/70;
 }
 
-/* Consistency suggestions - yellow underline */
+/* Consistency suggestions - purple underline (part of argument analysis) */
 .suggestion-consistency {
-  @apply bg-yellow-200/50 border-b-2 border-yellow-500;
+  @apply bg-purple-200/50 border-b-2 border-purple-500;
 }
 
 .suggestion-consistency:hover {
-  @apply bg-yellow-300/70;
+  @apply bg-purple-300/70;
 }
 
-/* Logical Flow suggestions - red underline */
+/* Logical Flow suggestions - purple underline (part of argument analysis) */
 .suggestion-logical_flow {
-  @apply bg-red-200/50 border-b-2 border-red-500;
+  @apply bg-purple-200/50 border-b-2 border-purple-500;
 }
 
 .suggestion-logical_flow:hover {
-  @apply bg-red-300/70;
+  @apply bg-purple-300/70;
 }
 
 /* Enhanced ProseMirror editor styling */

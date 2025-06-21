@@ -13,6 +13,55 @@ const openAI = new OpenAI({
   apiKey: Deno.env.get('OPENAI_API_KEY'),
 });
 
+/**
+ * Safely parse JSON with fallback handling for malformed responses
+ */
+function safeJsonParse(jsonString: string, fallbackSuggestions = true) {
+  try {
+    return JSON.parse(jsonString);
+  } catch (error) {
+    console.error('JSON parsing failed, attempting to clean and retry:', error);
+    
+    // Try to fix common JSON issues
+    try {
+      // Remove any control characters and fix common escaping issues
+      let cleaned = jsonString
+        .replace(/[\x00-\x1F\x7F]/g, '') // Remove control characters
+        .replace(/\\n/g, ' ') // Replace literal \n with spaces
+        .replace(/\\r/g, ' ') // Replace literal \r with spaces  
+        .replace(/\\t/g, ' ') // Replace literal \t with spaces
+        .replace(/\n/g, ' ') // Replace actual newlines with spaces
+        .replace(/\r/g, ' ') // Replace actual carriage returns with spaces
+        .replace(/\t/g, ' ') // Replace actual tabs with spaces
+        .replace(/"/g, '"') // Fix smart quotes
+        .replace(/"/g, '"') // Fix smart quotes
+        .replace(/'/g, "'") // Fix smart apostrophes
+        .replace(/'/g, "'"); // Fix smart apostrophes
+      
+      // Try to find the JSON object bounds
+      const start = cleaned.indexOf('{');
+      const end = cleaned.lastIndexOf('}');
+      
+      if (start !== -1 && end !== -1 && end > start) {
+        cleaned = cleaned.substring(start, end + 1);
+      }
+      
+      return JSON.parse(cleaned);
+    } catch (secondError) {
+      console.error('JSON cleaning also failed:', secondError);
+      // Return a safe fallback structure
+      if (fallbackSuggestions) {
+        return { suggestions: [] };
+      } else {
+        return {
+          grammarSuggestions: [],
+          academicVoiceSuggestions: []
+        };
+      }
+    }
+  }
+}
+
 Deno.serve(async req => {
   // Handle CORS preflight requests.
   if (req.method === 'OPTIONS') {
@@ -89,7 +138,7 @@ JSON FORMAT:
       }
 
       try {
-        const fastResult = JSON.parse(fastResponseContent);
+        const fastResult = safeJsonParse(fastResponseContent);
         // Ensure we don't exceed maxSuggestions
         if (fastResult.suggestions && maxSuggestions) {
           fastResult.suggestions = fastResult.suggestions.slice(0, maxSuggestions);
@@ -169,7 +218,7 @@ If no errors are found in either category, return empty arrays.`;
       }
 
       try {
-        const combinedResult = JSON.parse(combinedResponseContent);
+        const combinedResult = safeJsonParse(combinedResponseContent, false);
         
         return new Response(JSON.stringify(combinedResult), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -177,7 +226,14 @@ If no errors are found in either category, return empty arrays.`;
         });
       } catch (parseError) {
         console.error('Error parsing combined OpenAI JSON response:', parseError);
-        throw new Error('Could not parse combined response from AI.');
+        // Return fallback instead of throwing error
+        return new Response(JSON.stringify({
+          grammarSuggestions: [],
+          academicVoiceSuggestions: []
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 200,
+        });
       }
     }
 
@@ -229,8 +285,8 @@ JSON FORMAT:
     }
 
     try {
-      // The response from OpenAI is a JSON string, so we parse it.
-      const suggestions = JSON.parse(responseContent);
+      // Use safe JSON parsing instead of direct JSON.parse
+      const suggestions = safeJsonParse(responseContent);
 
       return new Response(JSON.stringify(suggestions), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -238,7 +294,11 @@ JSON FORMAT:
       });
     } catch (parseError) {
       console.error('Error parsing OpenAI JSON response:', parseError);
-      throw new Error('Could not parse response from AI.');
+      // Return fallback instead of throwing error
+      return new Response(JSON.stringify({ suggestions: [] }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 200,
+      });
     }
   } catch (error) {
     console.error('Error in grammar-check function:', error);

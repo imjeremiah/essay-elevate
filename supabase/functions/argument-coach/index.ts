@@ -5,11 +5,59 @@
  */
 
 import { corsHeaders } from '../_shared/cors.ts';
-import { OpenAI } from 'https://deno.land/x/openai/mod.ts';
+import { OpenAI } from 'https://deno.land/x/openai@v4.47.1/mod.ts';
 
-const openAI = new OpenAI({
-  apiKey: Deno.env.get('OPENAI_API_KEY'),
-});
+const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY');
+const client = new OpenAI({ apiKey: OPENAI_API_KEY });
+
+/**
+ * Safely parse JSON with fallback handling for malformed responses
+ */
+function safeJsonParse(jsonString: string) {
+  try {
+    return JSON.parse(jsonString);
+  } catch (error) {
+    console.error('JSON parsing failed, attempting to clean and retry:', error);
+    
+    // Try to fix common JSON issues
+    try {
+      // Remove any control characters and fix common escaping issues
+      let cleaned = jsonString
+        .replace(/[\x00-\x1F\x7F]/g, '') // Remove control characters
+        .replace(/\\n/g, ' ') // Replace literal \n with spaces
+        .replace(/\\r/g, ' ') // Replace literal \r with spaces  
+        .replace(/\\t/g, ' ') // Replace literal \t with spaces
+        .replace(/\n/g, ' ') // Replace actual newlines with spaces
+        .replace(/\r/g, ' ') // Replace actual carriage returns with spaces
+        .replace(/\t/g, ' ') // Replace actual tabs with spaces
+        .replace(/"/g, '"') // Fix smart quotes
+        .replace(/"/g, '"') // Fix smart quotes
+        .replace(/'/g, "'") // Fix smart apostrophes
+        .replace(/'/g, "'"); // Fix smart apostrophes
+      
+      // Try to find the JSON object bounds
+      const start = cleaned.indexOf('{');
+      const end = cleaned.lastIndexOf('}');
+      
+      if (start !== -1 && end !== -1 && end > start) {
+        cleaned = cleaned.substring(start, end + 1);
+      }
+      
+      return JSON.parse(cleaned);
+    } catch (secondError) {
+      console.error('JSON cleaning also failed:', secondError);
+      // Return a safe fallback structure
+      return {
+        suggestions: [],
+        documentAnalysis: {
+          overallStrength: "moderate",
+          mainIssues: ["Unable to analyze due to processing error"],
+          flowProblems: []
+        }
+      };
+    }
+  }
+}
 
 Deno.serve(async req => {
   if (req.method === 'OPTIONS') {
@@ -17,7 +65,7 @@ Deno.serve(async req => {
   }
 
   try {
-    if (!Deno.env.get('OPENAI_API_KEY')) {
+    if (!OPENAI_API_KEY) {
       throw new Error('OPENAI_API_KEY is not set.');
     }
 
@@ -30,49 +78,44 @@ Deno.serve(async req => {
       });
     }
 
-    const completion = await openAI.chat.completions.create({
-      model: 'gpt-4o-mini', // Faster model for sub-2-second performance
+    const completion = await client.chat.completions.create({
+      model: 'gpt-4o', // Better model for complex argument analysis
       messages: [
         {
           role: 'system',
-          content: `You are a high school writing tutor who specializes in helping 9th grade students with argumentative writing. Analyze the text for reasoning mistakes, unsupported claims, weak arguments, and writing flow issues. Find problematic sentences and provide categorized feedback using simple, encouraging language.
+          content: `You are an expert writing coach who helps students identify logical fallacies and weak arguments. Analyze the text and find specific problems.
 
-Identify these issues and assign categories:
-- **claim_support**: Statements without enough evidence or support
-- **fallacy**: Reasoning mistakes (like attacking the person instead of their idea, misrepresenting someone's argument, or presenting only two choices when there are more)
-- **consistency**: Contradictions or mixed-up positions within the text
-- **logical_flow**: Poor transitions, unclear connections between ideas, or confusing sequence
+LOOK FOR THESE ISSUES:
+1. **fallacy** - Logical errors like:
+   - Personal attacks instead of addressing the argument
+   - False either/or choices (ignoring other options)
+   - Using one example to prove everything
+   - Attacking a misrepresented version of someone's argument
+2. **claim_support** - Statements that need more evidence
+3. **consistency** - Contradictions within the text
+4. **logical_flow** - Poor connections between ideas
 
-For each issue, determine how serious it is: "high", "medium", or "low"
+For each problem you find, extract the EXACT sentence and explain what's wrong in simple terms.
 
-Return your response as a JSON object with this format: 
+Return JSON format:
 {
-  "suggestions": [...],
+  "suggestions": [
+    {
+      "original": "exact problematic sentence from the text",
+      "suggestion": "",
+      "explanation": "Simple explanation of what's wrong and why",
+      "category": "fallacy|claim_support|consistency|logical_flow",
+      "severity": "high|medium|low"
+    }
+  ],
   "documentAnalysis": {
     "overallStrength": "weak|moderate|strong",
-    "mainIssues": ["summary of 2-3 most important problems"],
-    "flowProblems": ["issues with how ideas connect"]
+    "mainIssues": ["main problems found"],
+    "flowProblems": []
   }
 }
 
-Each suggestion: { 
-  "original": "exact sentence", 
-  "suggestion": "", 
-  "explanation": "Clear, helpful explanation using vocabulary appropriate for 9th graders. Avoid academic jargon - use everyday language that a high school student would understand.",
-  "category": "claim_support|fallacy|consistency|logical_flow",
-  "severity": "high|medium|low",
-  "paragraphContext": "brief context about where this appears"
-}
-
-When explaining reasoning mistakes, use simple terms:
-- Instead of "ad hominem": "attacking the person instead of their idea"
-- Instead of "straw man": "misrepresenting someone's argument"
-- Instead of "false dichotomy": "presenting only two choices when there are more"
-- Instead of "hasty generalization": "jumping to a conclusion based on too little evidence"
-
-IMPORTANT: Always leave "suggestion" as an empty string "". Focus on coaching and teaching, not rewriting.
-
-If no issues: { "suggestions": [], "documentAnalysis": { "overallStrength": "strong", "mainIssues": [], "flowProblems": [] } }`,
+BE THOROUGH - look for every logical error, unsupported claim, and weak argument. The text likely has multiple issues.`,
         },
         {
           role: 'user',
@@ -80,8 +123,8 @@ If no issues: { "suggestions": [], "documentAnalysis": { "overallStrength": "str
         },
       ],
       response_format: { type: 'json_object' },
-      temperature: 0,
-      max_tokens: 800,
+      temperature: 0.1,
+      max_tokens: 1500, // Increased from 800 to allow more comprehensive analysis
     });
 
     const responseContent = completion.choices[0].message.content;
@@ -89,8 +132,8 @@ If no issues: { "suggestions": [], "documentAnalysis": { "overallStrength": "str
       throw new Error('No content in OpenAI response.');
     }
 
-    // The response from OpenAI is a JSON string, so we parse it and return.
-    const analysisResult = JSON.parse(responseContent);
+    // Use safe JSON parsing instead of direct JSON.parse
+    const analysisResult = safeJsonParse(responseContent);
 
     // Map the specific categories from the AI to our suggestion system
     // The AI now provides specific categories, so we use those instead of generic 'argument'

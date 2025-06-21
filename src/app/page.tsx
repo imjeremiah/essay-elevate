@@ -5,23 +5,17 @@
  * users to sign up or log in.
  */
 import { Button } from '@/components/ui/button';
-import { createClient } from '@/lib/supabase/server';
 import Link from 'next/link';
 
 /**
  * Renders the home page of the application.
  *
- * This server component fetches a test message from the Supabase database to
- * verify the connection and displays it. It also includes calls to action
-for users to either log in or sign up.
+ * This component serves as the main landing page with calls to action
+ * for users to either log in or sign up.
  *
  * @returns The main landing page component.
  */
-export default async function HomePage() {
-  const supabase = createClient();
-  const { data } = await supabase.from('messages').select('text').single();
-  const message = data?.text || 'Could not connect to the database.';
-
+export default function HomePage() {
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-background text-foreground">
       <main className="flex flex-col items-center justify-center flex-1 px-4 text-center">
@@ -29,12 +23,6 @@ export default async function HomePage() {
         <p className="mt-3 text-2xl">
           Your AI-powered writing assistant.
         </p>
-
-        <div className="mt-8 p-4 bg-muted rounded-lg border">
-          <p className="text-lg">
-            <strong>Connection Test:</strong> {message}
-          </p>
-        </div>
 
         <div className="flex flex-wrap items-center justify-around max-w-4xl mt-6 sm:w-full">
           <Link href="/login" passHref>
