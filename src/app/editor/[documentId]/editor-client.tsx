@@ -15,12 +15,13 @@ import { StarterKit } from '@tiptap/starter-kit';
 import { useCallback, useEffect, useState, useRef } from 'react';
 import { Suggestion, SuggestionCategory } from '@/lib/editor/suggestion-extension';
 import { useSuggestionEngine } from '@/lib/hooks/use-suggestion-engine';
-import { ThesisSidebar } from '@/components/feature/ThesisSidebar';
-import { CriticalThinkingMargin } from '@/components/feature/CriticalThinkingPrompt';
-import { type PromptPosition } from '@/lib/hooks/use-critical-thinking';
+
+
+
+import { EditorTourModal } from '@/components/onboarding/EditorTourModal';
 
 import { exportDocument, type ExportFormat } from '@/lib/export-utils';
-import { Lightbulb, MessageSquare, Zap, Target, Brain, Loader2, Download, FileText, Printer, ArrowLeft } from 'lucide-react';
+import { Lightbulb, MessageSquare, Zap, Target, Brain, Loader2, Download, FileText, Printer, ArrowLeft, PlayCircle } from 'lucide-react';
 import { DocumentAnalysis } from '@/lib/hooks/use-suggestion-engine';
 import Link from 'next/link';
 import './editor-styles.css';
@@ -93,9 +94,17 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
     category: SuggestionCategory;
   }>>([]);
 
-  // State for Thesis Analyzer
-  const [isThesisSidebarOpen, setThesisSidebarOpen] = useState(false);
-  const [selectedTextForThesis, setSelectedTextForThesis] = useState('');
+
+
+  // State for Thesis Analysis (integrated into main sidebar)
+  const [selectedThesisText, setSelectedThesisText] = useState('');
+  const [isAnalyzingThesis, setIsAnalyzingThesis] = useState(false);
+  const [thesisAnalysis, setThesisAnalysis] = useState<{
+    summary: string;
+    alternatives: Array<{ title: string; thesis: string; }>;
+  } | null>(null);
+  const [thesisError, setThesisError] = useState<string | null>(null);
+  const [showThesisInstructions, setShowThesisInstructions] = useState(false);
 
   // State for Argument Analysis
   const [isAnalyzingArgument, setIsAnalyzingArgument] = useState(false);
@@ -127,8 +136,7 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
   
 
 
-  // Critical thinking state
-  const [criticalThinkingPrompts, setCriticalThinkingPrompts] = useState<PromptPosition[]>([]);
+
 
   // Track whether suggestions have been processed (accepted/dismissed)
   const [hasProcessedSuggestions, setHasProcessedSuggestions] = useState(false);
@@ -136,9 +144,10 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
   // Track expanded explanations for suggestions
   const [expandedExplanations, setExpandedExplanations] = useState<Set<string>>(new Set());
 
-  const dismissCriticalPrompt = useCallback((promptId: string) => {
-    setCriticalThinkingPrompts(prev => prev.filter(p => p.id !== promptId));
-  }, []);
+  // Quick Tour modal state
+  const [isTourOpen, setIsTourOpen] = useState(false);
+
+
 
   const toggleExplanation = useCallback((suggestionKey: string) => {
     setExpandedExplanations(prev => {
@@ -349,9 +358,9 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
       lastCursorPositionRef.current = currentPosition;
 
       // Trigger critical thinking analysis
-      analyzeCriticalThinking();
     },
     onCreate: ({ editor: editorInstance }) => {
+      
       // Initial check after a delay to let user start typing
       setTimeout(() => {
         const text = editorInstance.getText();
@@ -597,27 +606,61 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
     setIsSaving(false);
   }, [editor, supabase, debouncedTitle, initialDocument.id, initialDocument.title, lastSavedContent]);
 
-  const handleThesisSidebarOpen = useCallback(() => {
+  // Integrated thesis analysis functions
+  const handleAnalyzeSelectedThesis = useCallback(() => {
     if (editor) {
       const { from, to } = editor.state.selection;
       const text = editor.state.doc.textBetween(from, to);
-      setSelectedTextForThesis(text);
-      setThesisSidebarOpen(true);
+      setSelectedThesisText(text);
+      setShowThesisInstructions(false); // Hide instructions when analysis begins
+      analyzeThesisText(text);
     }
   }, [editor]);
-  
-  const handleThesisSidebarClose = useCallback(() => {
-    setThesisSidebarOpen(false);
-    setSelectedTextForThesis('');
-  }, []);
+
+  const analyzeThesisText = useCallback(async (thesisText: string) => {
+    if (!thesisText.trim()) return;
+    
+    setIsAnalyzingThesis(true);
+    setThesisError(null);
+    setThesisAnalysis(null);
+
+    try {
+      const { data, error: invokeError } = await supabase.functions.invoke('thesis-analyzer', {
+        body: { thesis: thesisText },
+      });
+
+      if (invokeError || !data.analysis) {
+        setThesisError('Could not analyze the thesis. Please try again.');
+        console.error(invokeError);
+      } else {
+        setThesisAnalysis(data.analysis);
+      }
+    } catch (error) {
+      setThesisError('An error occurred during analysis.');
+      console.error(error);
+    }
+
+    setIsAnalyzingThesis(false);
+  }, [supabase]);
 
   const handleReplaceThesis = useCallback((newThesis: string) => {
-    if (editor) {
-      const { from, to } = editor.state.selection;
-      editor.chain().focus().deleteRange({ from, to }).insertContent(newThesis).run();
-      handleThesisSidebarClose();
+    if (editor && selectedThesisText) {
+      // Find the original thesis in the document and replace it
+      const text = editor.state.doc.textContent;
+      const start = text.indexOf(selectedThesisText);
+      if (start !== -1) {
+        const from = start + 1;
+        const to = start + selectedThesisText.length + 1;
+        editor.chain().focus().setTextSelection({ from, to }).deleteSelection().insertContent(newThesis).run();
+        
+        // Clear thesis analysis state
+        setSelectedThesisText('');
+        setThesisAnalysis(null);
+        setThesisError(null);
+        setShowThesisInstructions(false);
+      }
     }
-  }, [editor, handleThesisSidebarClose]);
+  }, [editor, selectedThesisText]);
 
   const handleExport = useCallback((format: ExportFormat) => {
     if (!editor) return;
@@ -626,20 +669,13 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
     exportDocument(format, title || 'Untitled Document', content);
   }, [editor, title]);
 
+  // Tour modal handlers
+  const openTour = useCallback(() => setIsTourOpen(true), []);
+  const closeTour = useCallback(() => setIsTourOpen(false), []);
+
   // Removed acceptSuggestion function since we handle it inline in the sidebar
 
-  // Add critical thinking analysis function
-  const analyzeCriticalThinking = useCallback(() => {
-    // Simple implementation - could be enhanced with actual AI analysis
-    if (!editor) return;
-    
-    const text = editor.getText();
-    if (text.length < 100) return; // Don't analyze very short content
-    
-    // For now, just clear existing prompts to avoid build-up
-    // In a full implementation, this would call an AI service
-    setCriticalThinkingPrompts([]);
-  }, [editor]);
+
 
   const debouncedEditorState = useDebounce(editor?.state.doc.toJSON(), 1000);
 
@@ -697,6 +733,15 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
                 />
               </div>
               <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={openTour}
+                  className="text-blue-600 border-blue-200 hover:bg-blue-50"
+                >
+                  <PlayCircle className="h-4 w-4 mr-2" />
+                  AI Features Tour
+                </Button>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="outline" size="sm">
@@ -707,13 +752,9 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
                   <DropdownMenuContent align="end">
                     <DropdownMenuLabel>Export Document</DropdownMenuLabel>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={() => handleExport('txt')}>
+                    <DropdownMenuItem onClick={() => handleExport('docx')}>
                       <FileText className="h-4 w-4 mr-2" />
-                      Text (.txt)
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => handleExport('html')}>
-                      <FileText className="h-4 w-4 mr-2" />
-                      HTML (.html)
+                      Word (.docx)
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => handleExport('pdf')}>
                       <Printer className="h-4 w-4 mr-2" />
@@ -721,13 +762,19 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
-                {isChecking && <div>Checking...</div>}
-                {isSaving ? (
-                  <div>Saving...</div>
-                ) : (
-                  <div className="text-green-600">Saved</div>
-                )}
-                {engineError && <div className="text-destructive">{engineError}</div>}
+                <div className="w-20 text-center text-xs">
+                  {isChecking ? (
+                    <span className="text-blue-600">Checking...</span>
+                  ) : isSaving ? (
+                    <span className="text-amber-600 flex items-center justify-center gap-1">
+                      <div className="w-2 h-2 bg-amber-600 rounded-full animate-pulse"></div>
+                      Saving...
+                    </span>
+                  ) : (
+                    <span className="text-green-600">✓ Saved</span>
+                  )}
+                </div>
+                {engineError && <div className="text-destructive text-xs w-24 text-center">{engineError}</div>}
               </div>
             </div>
           </div>
@@ -745,7 +792,7 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
                   }}
                 >
                   <div className="p-1 bg-background border rounded-lg shadow-md">
-                    <Button variant="ghost" size="sm" onClick={handleThesisSidebarOpen}>
+                    <Button variant="ghost" size="sm" onClick={handleAnalyzeSelectedThesis}>
                       Analyze as Thesis
                     </Button>
                   </div>
@@ -754,18 +801,13 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
 
               <div className="relative editor-container">
                 <EditorContent editor={editor} className="prose dark:prose-invert max-w-none fade-in" />
-                <CriticalThinkingMargin 
-                  prompts={criticalThinkingPrompts}
-                  onDismiss={dismissCriticalPrompt}
-                  editorElement={editor?.view.dom || null}
-                />
               </div>
             </div>
           </div>
         </div>
 
         {/* Right sidebar - Persistent suggestions panel */}
-        <div className="w-80 border-l border-gray-200 bg-gray-50/50 backdrop-blur-sm overflow-y-auto">
+        <div className="w-96 border-l border-gray-200 bg-gray-50/50 backdrop-blur-sm overflow-y-auto">
           <div className="h-full p-4">
             <h2 className="text-lg font-semibold mb-4 text-gray-900">
               Review suggestions
@@ -1500,7 +1542,7 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
                       <div className="flex items-center gap-2 mb-1">
                         <h3 className="font-semibold text-indigo-900 text-sm">Thesis</h3>
                         <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-medium">
-                          0
+                          {thesisAnalysis ? thesisAnalysis.alternatives.length : 0}
                         </span>
                       </div>
                       <p className="text-xs text-indigo-700">
@@ -1511,27 +1553,104 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={handleThesisSidebarOpen}
-                    disabled={!editor}
+                    onClick={() => setShowThesisInstructions(!showThesisInstructions)}
                     className="text-xs px-3 py-1.5 flex-shrink-0 ml-3"
                   >
                     Analyze
                   </Button>
                 </div>
+
+                {/* Instructions when button is clicked */}
+                {showThesisInstructions && !selectedThesisText && (
+                  <div className="mb-4 p-3 bg-indigo-50 rounded border border-indigo-200">
+                    <h4 className="text-xs font-semibold text-indigo-800 mb-2">How to analyze your thesis:</h4>
+                    <ol className="text-xs text-indigo-700 space-y-1 list-decimal list-inside">
+                      <li>Highlight your thesis statement in the text</li>
+                      <li>Click the "Analyze as Thesis" button that appears</li>
+                      <li>Get suggestions for stronger alternatives</li>
+                    </ol>
+                  </div>
+                )}
+
+                {/* Show selected thesis text */}
+                {selectedThesisText && (
+                  <div className="mb-4 p-3 bg-indigo-50 rounded border border-indigo-100">
+                    <p className="text-xs font-medium text-indigo-800 mb-1">Selected Thesis:</p>
+                    <p className="text-xs text-indigo-700 italic">
+                      &quot;{selectedThesisText}&quot;
+                    </p>
+                  </div>
+                )}
+
+                {/* Loading state */}
+                {isAnalyzingThesis && (
+                  <div className="flex justify-center items-center py-6">
+                    <Loader2 className="h-6 w-6 animate-spin text-indigo-600" />
+                    <span className="ml-2 text-xs text-indigo-600">Analyzing thesis...</span>
+                  </div>
+                )}
+
+                {/* Error state */}
+                {thesisError && (
+                  <div className="mb-4 p-3 bg-red-50 rounded border border-red-200">
+                    <p className="text-xs text-red-700">{thesisError}</p>
+                  </div>
+                )}
+
+                {/* Analysis results */}
+                {thesisAnalysis && (
+                  <div className="space-y-4">
+                    {/* Summary */}
+                    <div className="p-3 bg-blue-50 rounded border border-blue-200">
+                      <h4 className="text-xs font-semibold text-blue-800 mb-2">Analysis</h4>
+                      <p className="text-xs text-blue-700 leading-relaxed">
+                        {thesisAnalysis.summary}
+                      </p>
+                    </div>
+
+                    {/* Alternatives */}
+                    {thesisAnalysis.alternatives.length > 0 && (
+                      <div>
+                        <h4 className="text-xs font-semibold text-indigo-800 mb-3">Suggested Alternatives</h4>
+                        <div className="space-y-3">
+                          {thesisAnalysis.alternatives.map((alternative, index) => (
+                            <div key={index} className="p-3 bg-green-50 rounded border border-green-200">
+                              <h5 className="text-xs font-semibold text-green-800 mb-2">
+                                {alternative.title}
+                              </h5>
+                              <p className="text-xs text-green-700 mb-3 leading-relaxed">
+                                &quot;{alternative.thesis}&quot;
+                              </p>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="text-xs h-7 bg-green-100 border-green-300 text-green-800 hover:bg-green-200"
+                                onClick={() => handleReplaceThesis(alternative.thesis)}
+                              >
+                                Replace with this version
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
+
+
             </div>
           </div>
         </div>
       </div>
 
-      {/* Keep the thesis sidebar as modal for now since it needs user interaction */}
-      {isThesisSidebarOpen && (
-        <ThesisSidebar
-          selectedText={selectedTextForThesis}
-          onClose={handleThesisSidebarClose}
-          onReplace={handleReplaceThesis}
-        />
-      )}
+
+
+      {/* AI Features Tour Modal */}
+      <EditorTourModal 
+        isOpen={isTourOpen} 
+        onClose={closeTour} 
+      />
         
 
     </>

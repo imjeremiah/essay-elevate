@@ -7,10 +7,11 @@ import {
 } from '@/app/dashboard/actions';
 import { Button } from '@/components/ui/button';
 import { createClient } from '@/lib/supabase/server';
-import { Plus, FileText, Calendar, Clock } from 'lucide-react';
+import { Plus, FileText, Calendar, Clock, PlayCircle, Sparkles } from 'lucide-react';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { DocumentActions } from './document-actions';
+import { DashboardClient } from './dashboard-client';
 
 /**
  * Document interface for type safety
@@ -229,6 +230,9 @@ export default async function DashboardPage() {
 
       {/* Main content */}
       <div className="px-8 py-6">
+        {/* Tour Integration */}
+        <DashboardClient hasDocuments={processedDocuments.length > 0} />
+
         {processedDocuments.length === 0 ? (
           <div className="text-center py-12">
             <FileText className="mx-auto w-16 h-16 text-gray-300 mb-4" />
