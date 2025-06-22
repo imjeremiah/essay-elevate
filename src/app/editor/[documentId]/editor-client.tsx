@@ -622,16 +622,6 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
   }, [editor, supabase, debouncedTitle, initialDocument.id, initialDocument.title, lastSavedContent]);
 
   // Integrated thesis analysis functions
-  const handleAnalyzeSelectedThesis = useCallback(() => {
-    if (editor) {
-      const { from, to } = editor.state.selection;
-      const text = editor.state.doc.textBetween(from, to);
-      setSelectedThesisText(text);
-      setShowThesisInstructions(false); // Hide instructions when analysis begins
-      analyzeThesisText(text);
-    }
-  }, [editor, analyzeThesisText]);
-
   const analyzeThesisText = useCallback(async (thesisText: string) => {
     if (!thesisText.trim()) return;
     
@@ -657,6 +647,16 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
 
     setIsAnalyzingThesis(false);
   }, [supabase]);
+
+  const handleAnalyzeSelectedThesis = useCallback(() => {
+    if (editor) {
+      const { from, to } = editor.state.selection;
+      const text = editor.state.doc.textBetween(from, to);
+      setSelectedThesisText(text);
+      setShowThesisInstructions(false); // Hide instructions when analysis begins
+      analyzeThesisText(text);
+    }
+  }, [editor, analyzeThesisText]);
 
   const handleReplaceThesis = useCallback((newThesis: string) => {
     if (editor && selectedThesisText) {
