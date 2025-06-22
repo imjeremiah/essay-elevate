@@ -7,7 +7,7 @@ import {
 } from '@/app/dashboard/actions';
 import { Button } from '@/components/ui/button';
 import { createClient } from '@/lib/supabase/server';
-import { Plus, FileText, Calendar, Clock, PlayCircle, Sparkles } from 'lucide-react';
+import { Plus, FileText, Calendar, Clock } from 'lucide-react';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { DocumentActions } from './document-actions';

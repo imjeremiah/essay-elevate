@@ -6,7 +6,7 @@
 
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Plus, FileText, Brain, Sparkles } from 'lucide-react';
+import { Plus, Brain, Sparkles } from 'lucide-react';
 
 interface DashboardTourModalProps {
   isOpen: boolean;
@@ -48,7 +48,7 @@ export function DashboardTourModal({ isOpen, onClose, onCreateDocument }: Dashbo
 
           {/* Features Preview */}
           <div className="bg-gray-50 p-4 rounded-lg">
-            <h3 className="font-medium text-gray-900 mb-3">What you'll discover:</h3>
+            <h3 className="font-medium text-gray-900 mb-3">What you&apos;ll discover:</h3>
             <div className="space-y-2 text-sm">
               <div className="flex items-center gap-2">
                 <Sparkles className="w-4 h-4 text-blue-600" />

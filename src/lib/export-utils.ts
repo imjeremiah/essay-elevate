@@ -11,7 +11,7 @@ import { type JSONContent } from '@tiptap/react';
  * @param content - The Tiptap JSON content
  * @returns Plain text representation
  */
-function jsonToText(content: JSONContent): string {
+export function jsonToText(content: JSONContent): string {
   if (!content) return '';
 
   let text = '';

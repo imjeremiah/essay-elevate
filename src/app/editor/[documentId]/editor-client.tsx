@@ -630,7 +630,7 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
       setShowThesisInstructions(false); // Hide instructions when analysis begins
       analyzeThesisText(text);
     }
-  }, [editor]);
+  }, [editor, analyzeThesisText]);
 
   const analyzeThesisText = useCallback(async (thesisText: string) => {
     if (!thesisText.trim()) return;

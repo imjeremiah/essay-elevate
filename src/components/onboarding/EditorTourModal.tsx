@@ -7,7 +7,7 @@
 
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { ChevronLeft, ChevronRight, Lightbulb, Sparkles } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Sparkles } from 'lucide-react';
 import { useState } from 'react';
 import { tourSteps, type TourStep } from './tour-data';
 
@@ -81,7 +81,7 @@ export function EditorTourModal({ isOpen, onClose }: EditorTourModalProps) {
         return (
           <div className="space-y-6 h-full">
             <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
-              <div className="text-gray-700 italic">"{step.demoText}"</div>
+              <div className="text-gray-700 italic">&quot;{step.demoText}&quot;</div>
             </div>
             <div className="text-center">
               <Button 
@@ -99,7 +99,7 @@ export function EditorTourModal({ isOpen, onClose }: EditorTourModalProps) {
                   {step.alternatives.map((alt, index) => (
                     <div key={index} className="p-4 bg-white border border-gray-200 rounded-lg shadow-sm">
                       <div className="font-medium text-blue-600 text-sm mb-2">{alt.title}</div>
-                      <div className="text-sm text-gray-700 leading-relaxed">"{alt.thesis}"</div>
+                      <div className="text-sm text-gray-700 leading-relaxed">&quot;{alt.thesis}&quot;</div>
                     </div>
                   ))}
                 </div>
@@ -146,7 +146,6 @@ export function EditorTourModal({ isOpen, onClose }: EditorTourModalProps) {
           dangerouslySetInnerHTML={{ __html: result }}
           onClick={(e) => {
             const target = e.target as HTMLElement;
-            const suggestionId = target.getAttribute('data-suggestion-id');
             const original = target.getAttribute('data-original');
             if (original) {
               // Unescape the original text
