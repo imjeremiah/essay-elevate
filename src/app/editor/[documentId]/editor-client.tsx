@@ -144,6 +144,9 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
   // Track expanded explanations for suggestions
   const [expandedExplanations, setExpandedExplanations] = useState<Set<string>>(new Set());
 
+  // Track expanded suggestion categories
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+
   // Quick Tour modal state
   const [isTourOpen, setIsTourOpen] = useState(false);
 
@@ -156,6 +159,18 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
         newSet.delete(suggestionKey);
       } else {
         newSet.add(suggestionKey);
+      }
+      return newSet;
+    });
+  }, []);
+
+  const toggleCategoryExpansion = useCallback((categoryKey: string) => {
+    setExpandedCategories(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(categoryKey)) {
+        newSet.delete(categoryKey);
+      } else {
+        newSet.add(categoryKey);
       }
       return newSet;
     });
@@ -857,7 +872,7 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
                     {/* Show grammar suggestions */}
                     {correctnessSuggestions.length > 0 && (
                       <div className="space-y-2">
-                        {correctnessSuggestions.slice(0, 3).map((suggestion, index) => (
+                        {(expandedCategories.has('correctness') ? correctnessSuggestions : correctnessSuggestions.slice(0, 3)).map((suggestion, index) => (
                           <div 
                             key={index}
                             className="p-2 bg-red-50 rounded border border-red-100 cursor-pointer hover:bg-red-100 transition-colors"
@@ -978,10 +993,21 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
                             )}
                           </div>
                         ))}
-                        {correctnessSuggestions.length > 3 && (
-                          <p className="text-xs text-blue-600 text-center">
+                        {correctnessSuggestions.length > 3 && !expandedCategories.has('correctness') && (
+                          <button 
+                            className="text-xs text-blue-600 text-center w-full hover:text-blue-800 hover:underline"
+                            onClick={() => toggleCategoryExpansion('correctness')}
+                          >
                             +{correctnessSuggestions.length - 3} more suggestions
-                          </p>
+                          </button>
+                        )}
+                        {correctnessSuggestions.length > 3 && expandedCategories.has('correctness') && (
+                          <button 
+                            className="text-xs text-blue-600 text-center w-full hover:text-blue-800 hover:underline"
+                            onClick={() => toggleCategoryExpansion('correctness')}
+                          >
+                            Show fewer suggestions
+                          </button>
                         )}
                       </div>
                     )}
@@ -1027,7 +1053,7 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
                 {/* Show clarity suggestions */}
                 {claritySuggestions.length > 0 && (
                   <div className="space-y-2">
-                    {claritySuggestions.slice(0, 3).map((suggestion, index) => {
+                    {(expandedCategories.has('clarity') ? claritySuggestions : claritySuggestions.slice(0, 3)).map((suggestion, index) => {
                       const suggestionKey = `clarity-${index}-${suggestion.original.substring(0, 20)}`;
                       const isExpanded = expandedExplanations.has(suggestionKey);
                       
@@ -1158,10 +1184,21 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
                         </div>
                       );
                     })}
-                    {claritySuggestions.length > 3 && (
-                      <p className="text-xs text-amber-600 text-center">
+                    {claritySuggestions.length > 3 && !expandedCategories.has('clarity') && (
+                      <button 
+                        className="text-xs text-amber-600 text-center w-full hover:text-amber-800 hover:underline"
+                        onClick={() => toggleCategoryExpansion('clarity')}
+                      >
                         +{claritySuggestions.length - 3} more suggestions
-                      </p>
+                      </button>
+                    )}
+                    {claritySuggestions.length > 3 && expandedCategories.has('clarity') && (
+                      <button 
+                        className="text-xs text-amber-600 text-center w-full hover:text-amber-800 hover:underline"
+                        onClick={() => toggleCategoryExpansion('clarity')}
+                      >
+                        Show fewer suggestions
+                      </button>
                     )}
                   </div>
                 )}
@@ -1205,7 +1242,7 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
                 {/* Show evidence suggestions */}
                 {evidenceSuggestions.length > 0 && (
                   <div className="space-y-2">
-                    {evidenceSuggestions.slice(0, 3).map((suggestion, index) => {
+                    {(expandedCategories.has('evidence') ? evidenceSuggestions : evidenceSuggestions.slice(0, 3)).map((suggestion, index) => {
                       const suggestionKey = `evidence-${index}-${suggestion.original.substring(0, 20)}`;
                       const isExpanded = expandedExplanations.has(suggestionKey);
                       
@@ -1258,8 +1295,8 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
                           </div>
                           
                           {/* Action buttons */}
-                          {suggestion.suggestion && (
-                            <div className="flex gap-2">
+                          <div className="flex gap-2">
+                            {suggestion.suggestion && suggestion.suggestion.trim() && (
                               <Button
                                 size="sm"
                                 variant="outline"
@@ -1288,58 +1325,69 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
                               >
                                 Accept
                               </Button>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="text-xs h-7 flex-1 text-gray-600 hover:bg-gray-100"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  
-                                  // Remove suggestion marks when dismissing
-                                  if (editor) {
-                                    const text = editor.state.doc.textContent;
-                                    const occurrences = findOccurrences(text, suggestion.original);
-                                    if (occurrences.length > 0) {
-                                      const { start, end } = occurrences[0];
-                                      const from = start + 1;
-                                      const to = end + 1;
-                                      removeSuggestionMarks(editor, from, to);
-                                    }
-                                  }
-                                  
-                                  setEvidenceSuggestions(prev => prev.filter(s => s.original !== suggestion.original));
-                                  setHasProcessedSuggestions(true);
-                                }}
-                              >
-                                Dismiss
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="text-xs h-7 text-blue-600 hover:bg-blue-100"
-                                onClick={() => {
-                                  if (!editor) return;
+                            )}
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="text-xs h-7 flex-1 text-gray-600 hover:bg-gray-100"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                
+                                // Remove suggestion marks when dismissing
+                                if (editor) {
                                   const text = editor.state.doc.textContent;
                                   const occurrences = findOccurrences(text, suggestion.original);
                                   if (occurrences.length > 0) {
                                     const { start, end } = occurrences[0];
                                     const from = start + 1;
                                     const to = end + 1;
-                                    editor.chain().focus().setTextSelection({ from, to }).run();
+                                    removeSuggestionMarks(editor, from, to);
                                   }
-                                }}
-                              >
-                                Find
-                              </Button>
-                            </div>
-                          )}
+                                }
+                                
+                                setEvidenceSuggestions(prev => prev.filter(s => s.original !== suggestion.original));
+                                setHasProcessedSuggestions(true);
+                              }}
+                            >
+                              Dismiss
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="text-xs h-7 text-blue-600 hover:bg-blue-100"
+                              onClick={() => {
+                                if (!editor) return;
+                                const text = editor.state.doc.textContent;
+                                const occurrences = findOccurrences(text, suggestion.original);
+                                if (occurrences.length > 0) {
+                                  const { start, end } = occurrences[0];
+                                  const from = start + 1;
+                                  const to = end + 1;
+                                  editor.chain().focus().setTextSelection({ from, to }).run();
+                                }
+                              }}
+                            >
+                              Find
+                            </Button>
+                          </div>
                         </div>
                       );
                     })}
-                    {evidenceSuggestions.length > 3 && (
-                      <p className="text-xs text-blue-600 text-center">
+                    {evidenceSuggestions.length > 3 && !expandedCategories.has('evidence') && (
+                      <button 
+                        className="text-xs text-blue-600 text-center w-full hover:text-blue-800 hover:underline"
+                        onClick={() => toggleCategoryExpansion('evidence')}
+                      >
                         +{evidenceSuggestions.length - 3} more suggestions
-                      </p>
+                      </button>
+                    )}
+                    {evidenceSuggestions.length > 3 && expandedCategories.has('evidence') && (
+                      <button 
+                        className="text-xs text-blue-600 text-center w-full hover:text-blue-800 hover:underline"
+                        onClick={() => toggleCategoryExpansion('evidence')}
+                      >
+                        Show fewer suggestions
+                      </button>
                     )}
                   </div>
                 )}
@@ -1383,7 +1431,7 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
                 {/* Show argument suggestions */}
                 {argumentSuggestions.length > 0 && (
                   <div className="space-y-2">
-                    {argumentSuggestions.slice(0, 3).map((suggestion, index) => {
+                    {(expandedCategories.has('argument') ? argumentSuggestions : argumentSuggestions.slice(0, 3)).map((suggestion, index) => {
                       const suggestionKey = `argument-${index}-${suggestion.original.substring(0, 20)}`;
                       const isExpanded = expandedExplanations.has(suggestionKey);
                       
@@ -1392,35 +1440,13 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
                           key={index}
                           className="p-3 bg-purple-50 rounded border border-purple-100 transition-colors"
                         >
-                          {/* Original text */}
-                          <p className="text-xs font-medium text-purple-800 mb-2">
-                            &quot;{suggestion.original.length > 50 ? suggestion.original.substring(0, 50) + '...' : suggestion.original}&quot;
-                          </p>
-                          
-                          {/* Suggested replacement - Arguments typically don't have direct replacements */}
-                          {suggestion.suggestion && suggestion.suggestion.trim() && (
-                            <div className="mb-3 p-2 bg-green-50 border border-green-200 rounded">
-                              <p className="text-xs text-green-700 font-medium mb-1">Suggestion:</p>
-                              <p className="text-xs text-green-800 font-semibold">
-                                &quot;{suggestion.suggestion}&quot;
-                              </p>
-                            </div>
-                          )}
-                          
-                          {/* Show severity badge if available */}
-                          {suggestion.severity && (
-                            <div className="mb-2">
-                              <span className={`text-xs px-2 py-1 rounded-full font-medium ${
-                                suggestion.severity === 'high' ? 'bg-red-100 text-red-700' :
-                                suggestion.severity === 'medium' ? 'bg-yellow-100 text-yellow-700' :
-                                'bg-blue-100 text-blue-700'
-                              }`}>
-                                {suggestion.severity === 'high' ? 'High Priority' :
-                                 suggestion.severity === 'medium' ? 'Medium Priority' :
-                                 'Low Priority'}
-                              </span>
-                            </div>
-                          )}
+                          {/* Weak argument text */}
+                          <div className="mb-3">
+                            <p className="text-xs text-purple-700 font-medium mb-1">Weak argument:</p>
+                            <p className="text-xs font-medium text-purple-800">
+                              &quot;{suggestion.original}&quot;
+                            </p>
+                          </div>
                           
                           {/* Explanation section */}
                           <div className="mb-3">
@@ -1457,36 +1483,6 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
                           
                           {/* Action buttons */}
                           <div className="flex gap-2">
-                            {suggestion.suggestion && suggestion.suggestion.trim() && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="text-xs h-7 flex-1 bg-green-50 border-green-200 text-green-700 hover:bg-green-100"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  if (!editor) return;
-                                  const text = editor.state.doc.textContent;
-                                  const occurrences = findOccurrences(text, suggestion.original);
-                                  if (occurrences.length > 0) {
-                                    const { start, end } = occurrences[0];
-                                    const from = start + 1;
-                                    const to = end + 1;
-                                    
-                                    // Remove suggestion marks first, then replace text
-                                    removeSuggestionMarks(editor, from, to);
-                                    
-                                    // Replace the text with the suggestion
-                                    editor.chain().focus().setTextSelection({ from, to }).deleteSelection().insertContent(suggestion.suggestion).run();
-                                    
-                                    // Remove from suggestions list
-                                    setArgumentSuggestions(prev => prev.filter(s => s.original !== suggestion.original));
-                                    setHasProcessedSuggestions(true);
-                                  }
-                                }}
-                              >
-                                Accept
-                              </Button>
-                            )}
                             <Button
                               size="sm"
                               variant="ghost"
@@ -1524,10 +1520,21 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
                         </div>
                       );
                     })}
-                    {argumentSuggestions.length > 3 && (
-                      <p className="text-xs text-purple-600 text-center">
+                    {argumentSuggestions.length > 3 && !expandedCategories.has('argument') && (
+                      <button 
+                        className="text-xs text-purple-600 text-center w-full hover:text-purple-800 hover:underline"
+                        onClick={() => toggleCategoryExpansion('argument')}
+                      >
                         +{argumentSuggestions.length - 3} more suggestions
-                      </p>
+                      </button>
+                    )}
+                    {argumentSuggestions.length > 3 && expandedCategories.has('argument') && (
+                      <button 
+                        className="text-xs text-purple-600 text-center w-full hover:text-purple-800 hover:underline"
+                        onClick={() => toggleCategoryExpansion('argument')}
+                      >
+                        Show fewer suggestions
+                      </button>
                     )}
                   </div>
                 )}

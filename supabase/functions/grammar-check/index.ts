@@ -92,7 +92,7 @@ Deno.serve(async req => {
         messages: [
           {
             role: 'system',
-            content: `You are a systematic grammar correction assistant. Follow this EXACT process:
+            content: `You are a systematic grammar correction assistant for 9th grade students. Follow this EXACT process:
 
 STEP 1: SCAN FOR CAPITALIZATION (Check every single word)
 - Find the first word → Must be capitalized
@@ -106,13 +106,22 @@ STEP 2: SCAN FOR OTHER ERRORS
 - Subject-verb agreement (he have→he has)
 - Wrong verb tenses (I have went→I went)
 - Articles (a apple→an apple)
-- Homophones (to/too, their/there)
+- Homophones (to/too, their/there/they're, your/you're, its/it's, then/than)
+
+STEP 3: SCAN FOR EFFECT vs AFFECT (CRITICAL ERROR)
+- "AFFECT" = verb (to influence) - use when something influences something else
+- "EFFECT" = noun (the result) - use when talking about a result or consequence
+- Common patterns to fix:
+  * "that effects" → "that affects" (verb needed)
+  * "will effect" → "will affect" (verb needed)
+  * "can effect" → "can affect" (verb needed)
 
 PROCESS INSTRUCTIONS:
 1. Work through the text character by character
 2. When you see ". " or "! " or "? " → the next word MUST start with capital
 3. Mark EVERY violation you find
 4. Don't skip any - be mechanical and thorough
+5. Pay special attention to effect/affect - this is often missed
 
 Return exactly what you find. No interpretation, just systematic correction.
 
@@ -171,7 +180,8 @@ CRITICAL RULES:
 1. Identify the Full Phrase: Always expand your selection to include all parts of the incorrect grammatical phrase.
 2. Be Conservative: When in doubt, DO NOT suggest a change. Only flag clear, unambiguous errors.
 3. Do Not Flag Punctuation: Never flag correct punctuation like periods or standard commas.
-4. Handle Homophones: Correctly identify and fix misuse of homophones.
+4. Handle Homophones: Correctly identify and fix misuse of homophones (their/there/they're, your/you're, its/it's, to/too/two, then/than).
+5. CRITICAL: Effect vs Affect - "AFFECT" = verb (to influence), "EFFECT" = noun (result). Fix patterns like "that effects" → "that affects".
 
 TASK 2 - ACADEMIC VOICE IMPROVEMENTS:
 Identify and correct informal or casual language to help 9th grade students develop a clear, confident writing voice suitable for high school essays.
@@ -244,7 +254,7 @@ If no errors are found in either category, return empty arrays.`;
       messages: [
         {
           role: 'system',
-          content: `You are a systematic grammar correction assistant. Follow this EXACT process:
+          content: `You are a systematic grammar correction assistant for 9th grade students. Follow this EXACT process:
 
 STEP 1: SCAN FOR CAPITALIZATION (Check every single word)
 - Find the first word → Must be capitalized
@@ -258,13 +268,22 @@ STEP 2: SCAN FOR OTHER ERRORS
 - Subject-verb agreement (he have→he has)
 - Wrong verb tenses (I have went→I went)
 - Articles (a apple→an apple)
-- Homophones (to/too, their/there)
+- Homophones (to/too, their/there/they're, your/you're, its/it's, then/than)
+
+STEP 3: SCAN FOR EFFECT vs AFFECT (CRITICAL ERROR)
+- "AFFECT" = verb (to influence) - use when something influences something else
+- "EFFECT" = noun (the result) - use when talking about a result or consequence
+- Common patterns to fix:
+  * "that effects" → "that affects" (verb needed)
+  * "will effect" → "will affect" (verb needed)
+  * "can effect" → "can affect" (verb needed)
 
 PROCESS INSTRUCTIONS:
 1. Work through the text character by character
 2. When you see ". " or "! " or "? " → the next word MUST start with capital
 3. Mark EVERY violation you find
 4. Don't skip any - be mechanical and thorough
+5. Pay special attention to effect/affect - this is often missed
 
 Return exactly what you find. No interpretation, just systematic correction.
 

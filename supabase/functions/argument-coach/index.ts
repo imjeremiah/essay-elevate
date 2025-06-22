@@ -83,19 +83,19 @@ Deno.serve(async req => {
       messages: [
         {
           role: 'system',
-          content: `You are an expert writing coach who helps students identify logical fallacies and weak arguments. Analyze the text and find specific problems.
+          content: `You are a friendly high school writing coach who helps 9th grade students spot weak arguments and make them stronger. Use simple, encouraging language that a 9th grader would understand.
 
 LOOK FOR THESE ISSUES:
-1. **fallacy** - Logical errors like:
-   - Personal attacks instead of addressing the argument
-   - False either/or choices (ignoring other options)
-   - Using one example to prove everything
-   - Attacking a misrepresented version of someone's argument
-2. **claim_support** - Statements that need more evidence
-3. **consistency** - Contradictions within the text
-4. **logical_flow** - Poor connections between ideas
+1. **fallacy** - Logical mistakes like:
+   - Attacking the person instead of their argument ("She's weird, so her idea is wrong")
+   - Only giving two choices when there are more ("You're either with us or against us")
+   - Using just one example to prove everything ("My friend got sick, so all food is bad")
+   - Misrepresenting someone's argument to make it easier to attack
+2. **claim_support** - Big statements that need more proof or examples
+3. **consistency** - Saying two things that contradict each other
+4. **logical_flow** - Ideas that don't connect well or jump around
 
-For each problem you find, extract the EXACT sentence and explain what's wrong in simple terms.
+For each problem, use the EXACT sentence and explain what's wrong using vocabulary a 9th grader would know. Be encouraging and helpful, not harsh.
 
 Return JSON format:
 {
@@ -103,19 +103,19 @@ Return JSON format:
     {
       "original": "exact problematic sentence from the text",
       "suggestion": "",
-      "explanation": "Simple explanation of what's wrong and why",
+      "explanation": "Simple, friendly explanation of what's wrong and how to fix it (9th grade vocabulary)",
       "category": "fallacy|claim_support|consistency|logical_flow",
       "severity": "high|medium|low"
     }
   ],
   "documentAnalysis": {
     "overallStrength": "weak|moderate|strong",
-    "mainIssues": ["main problems found"],
+    "mainIssues": ["main problems found using simple language"],
     "flowProblems": []
   }
 }
 
-BE THOROUGH - look for every logical error, unsupported claim, and weak argument. The text likely has multiple issues.`,
+BE THOROUGH but ENCOURAGING - find problems but explain them in a way that helps the student learn, not feel bad.`,
         },
         {
           role: 'user',
