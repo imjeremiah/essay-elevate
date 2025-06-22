@@ -1573,7 +1573,7 @@ export function EditorClient({ initialDocument }: EditorClientProps) {
                     <h4 className="text-xs font-semibold text-indigo-800 mb-2">How to analyze your thesis:</h4>
                     <ol className="text-xs text-indigo-700 space-y-1 list-decimal list-inside">
                       <li>Highlight your thesis statement in the text</li>
-                      <li>Click the "Analyze as Thesis" button that appears</li>
+                      <li>Click the &quot;Analyze as Thesis&quot; button that appears</li>
                       <li>Get suggestions for stronger alternatives</li>
                     </ol>
                   </div>

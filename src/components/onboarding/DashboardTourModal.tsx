@@ -100,7 +100,7 @@ export function DashboardTourModal({ isOpen, onClose, onCreateDocument }: Dashbo
           {/* Hint */}
           <div className="text-center">
             <p className="text-xs text-gray-500">
-              💡 Look for the "AI Features Tour" button in the editor to see how everything works!
+              💡 Look for the &quot;AI Features Tour&quot; button in the editor to see how everything works!
             </p>
           </div>
         </div>
