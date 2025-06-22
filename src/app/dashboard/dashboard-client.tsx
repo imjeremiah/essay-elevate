@@ -30,8 +30,7 @@ export function DashboardClient({ hasDocuments }: DashboardClientProps) {
 
   const handleCreateDocument = async () => {
     // Create document using server action
-    const formData = new FormData();
-    await createDocument(formData);
+    await createDocument();
   };
 
   return (
